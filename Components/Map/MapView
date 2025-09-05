@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -61,8 +60,6 @@ export default function MapView({ settlements, selectedRegion, selectedSubRegion
   });
 
   // יצירת רשימה של כל התתי-אזורים הקיימים
-  // This needs to be derived once, preferably when settlements change, or before rendering.
-  // Using a useMemo or recalculating here is fine for now as settlements typically don't change very rapidly.
   const allSubRegions = [...new Set(settlements.map(s => s.sub_region).filter(Boolean))].sort();
 
 
@@ -103,17 +100,12 @@ export default function MapView({ settlements, selectedRegion, selectedSubRegion
 
   // פונקציה לקביעת צבע לפי תת-אזור או אזור
   const getSettlementColor = (settlement) => {
-    // אם יש תת-אזור, השתמש בצבע דינמי לפי רשימת התתי-אזורים
     if (settlement.sub_region) {
       return generateSubRegionColor(settlement.sub_region, allSubRegions);
     }
-    
-    // אחרת השתמש בצבע של האזור
     if (settlement.region && regionColors[settlement.region]) {
       return regionColors[settlement.region];
     }
-    
-    // ברירת מחדל
     return regionColors.default;
   };
 

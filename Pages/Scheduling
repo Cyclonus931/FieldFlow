@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, UserCheck, Sparkles, Wand2, Calendar as CalendarIcon, Star, Clock, ShieldAlert, CalendarX, CalendarDays } from 'lucide-react';
 import { createPageUrl } from '@/utils';
-import { usePermissions } from '../components/auth/PermissionGate'; // New import
+import { usePermissions } from '../components/auth/PermissionGate.jsx'; // New import
 
 const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCreated }) => {
     const [manualData, setManualData] = useState({

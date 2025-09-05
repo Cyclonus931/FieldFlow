@@ -1,0 +1,46 @@
+{
+  "name": "User",
+  "type": "object",
+  "properties": {
+    "full_name": {
+      "type": "string",
+      "description": "שם מלא של המשתמש"
+    },
+    "email": {
+      "type": "string",
+      "description": "כתובת אימייל"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "admin",
+        "user"
+      ],
+      "default": "user",
+      "description": "תפקיד המשתמש במערכת"
+    },
+    "phone": {
+      "type": "string",
+      "description": "מספר טלפון"
+    },
+    "department": {
+      "type": "string",
+      "description": "מחלקה"
+    },
+    "last_login": {
+      "type": "string",
+      "format": "date-time",
+      "description": "תאריך התחברות אחרון"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true,
+      "description": "האם המשתמש פעיל"
+    }
+  },
+  "required": [
+    "full_name",
+    "email",
+    "role"
+  ]
+}

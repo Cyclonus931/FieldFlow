@@ -18,9 +18,9 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import MapView from "../components/map/MapView";
-import RegionFilters from "../components/filters/RegionFilters";
-import { PermissionGate } from '../components/auth/PermissionGate';
+import MapView from "../components/map/MapView.js";
+import RegionFilters from "../components/filters/RegionFilters.js";
+import { PermissionGate } from '../components/auth/PermissionGate.js';
 
 export default function Dashboard() {
   const [settlements, setSettlements] = useState([]);

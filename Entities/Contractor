@@ -49,7 +49,7 @@
     "default_hours": {
       "type": "string",
       "default": "08:00-18:00",
-      "description": "שעות עבודה בריריית מחדל"
+      "description": "שעות עבודה בריית מחדל"
     },
     "priority": {
       "type": "string",

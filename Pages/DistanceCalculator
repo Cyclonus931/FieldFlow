@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect } from "react";
 import { Settlement } from "@/entities/Settlement";
-import { SystemConfig } from "@/entities/SystemConfig";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,7 +20,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { createPageUrl } from "@/utils";
-import { PermissionGate } from '../components/auth/PermissionGate';
+import { PermissionGate } from '../components/auth/PermissionGate.jsx';
 
 // תיקון אייקונים של Leaflet
 delete L.Icon.Default.prototype._getIconUrl;

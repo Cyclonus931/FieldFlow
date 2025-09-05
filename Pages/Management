@@ -1,18 +1,18 @@
 
 import React, { useState, useEffect } from 'react';
-import { User } from '@/entities/User';
+import { User } from '@/entities/User.ts'; // Corrected: Added .ts extension as per "file extension fix"
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ShieldAlert, KeyRound, MapPin, Users, Wrench, Clock, UserCog, CalendarDays } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import ApiKeyManager from '../components/management/ApiKeyManager';
-import SettlementManager from '../components/management/SettlementManager';
-import ContractorManager from '../components/management/ContractorManager';
-import ContractorAvailabilityManager from '../components/management/ContractorAvailabilityManager';
-import TaskTypeManager from '../components/management/TaskTypeManager';
-import UserManager from '../components/management/UserManager';
-import BusinessDayHolidayManager from '../components/management/BusinessDayHolidayManager';
-import { PermissionGate } from '../components/auth/PermissionGate';
+import ApiKeyManager from '../components/management/ApiKeyManager.jsx';
+import SettlementManager from '../components/management/SettlementManager.jsx';
+import ContractorManager from '../components/management/ContractorManager.jsx';
+import ContractorAvailabilityManager from '../components/management/ContractorAvailabilityManager.jsx';
+import TaskTypeManager from '../components/management/TaskTypeManager.jsx';
+import UserManager from '../components/management/UserManager.jsx';
+import BusinessDayHolidayManager from '../components/management/BusinessDayHolidayManager.jsx';
+import { PermissionGate } from '../components/auth/PermissionGate.jsx';
 
 function ComingSoonTab({ title, icon: Icon }) {
     return (
