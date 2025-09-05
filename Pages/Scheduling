@@ -17,9 +17,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, UserCheck, Sparkles, Wand2, Calendar as CalendarIcon, Star, Clock, ShieldAlert, CalendarX, CalendarDays } from 'lucide-react';
 import { createPageUrl } from '@/utils';
-import { usePermissions } from '../components/auth/PermissionGate.jsx'; // New import
+import { usePermissions } from '../components/auth/PermissionGate'; // Removed .jsx extension
 
-const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCreated }) => {
+const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCreated, contractorAvailabilities, appointments }) => {
     const [manualData, setManualData] = useState({
         contractorId: '',
         settlementName: '',
@@ -28,6 +28,47 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
         timeSlot: '08:00-10:00'
     });
     const [isCreating, setIsCreating] = useState(false);
+
+    // Helper to parse HH:MM string to minutes from midnight
+    const parseTimeToMinutes = (timeStr) => {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+
+    // Helper function to check for time slot overlap
+    const checkTimeSlotOverlap = (slot1, slot2) => {
+        const [s1_start_str, s1_end_str] = slot1.split('-');
+        const [s2_start_str, s2_end_str] = slot2.split('-');
+
+        const s1_start = parseTimeToMinutes(s1_start_str);
+        const s1_end = parseTimeToMinutes(s1_end_str);
+        const s2_start = parseTimeToMinutes(s2_start_str);
+        const s2_end = parseTimeToMinutes(s2_end_str);
+
+        // Overlap occurs if (start1 < end2) AND (start2 < end1)
+        return s1_start < s2_end && s2_start < s1_end;
+    };
+
+    // Helper to check if a slot is within a range
+    const isSlotWithinRange = (slot, range) => {
+        if (!slot || !range || !slot.includes('-') || !range.includes('-')) return false;
+        try {
+            const [slotStart, slotEnd] = slot.split('-').map(parseTimeToMinutes);
+            const [rangeStart, rangeEnd] = range.split('-').map(parseTimeToMinutes);
+            // Slot is within range if its start is >= range start AND its end is <= range end
+            return slotStart >= rangeStart && slotEnd <= rangeEnd;
+        } catch(e) {
+            console.error("Error parsing time range for validation:", slot, range, e);
+            return false; // Fail safely
+        }
+    };
+
+    // Helper function to parse a date string into a local Date object
+    const parseDateStringAsLocal = (dateString) => {
+      if (!dateString) return null;
+      const parts = dateString.split('-').map(part => parseInt(part, 10));
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    };
 
     const handleCreate = async () => {
         setIsCreating(true);
@@ -39,6 +80,81 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
             }
 
             const contractor = contractors.find(c => c.contractor_id === manualData.contractorId);
+            if (!contractor) {
+                alert('שגיאה: קבלן לא נמצא.');
+                setIsCreating(false);
+                return;
+            }
+            
+            // 1. Check for existing appointment overlaps
+            const existingAppointmentsOnDate = appointments.filter(apt => 
+                apt.contractor_id === manualData.contractorId && 
+                apt.appointment_date === manualData.date &&
+                apt.status !== 'בוטל' && apt.status !== 'הושלם' // Consider active/planned appointments
+            );
+
+            const isOverlapping = existingAppointmentsOnDate.some(apt => 
+                checkTimeSlotOverlap(apt.time_slot, manualData.timeSlot)
+            );
+
+            if (isOverlapping) {
+                alert('התנגשות בתיאום! לקבלן כבר יש תיאום שחופף לזמן המבוקש. אנא בחר זמן אחר.');
+                setIsCreating(false);
+                return;
+            }
+
+            // 2. Check for contractor availability rules
+            const selectedDateObj = parseDateStringAsLocal(manualData.date);
+            if (!selectedDateObj) {
+                alert('תאריך שנבחר אינו תקין.');
+                setIsCreating(false);
+                return;
+            }
+            const dayOfWeek = selectedDateObj.getDay(); // 0=Sunday, 6=Saturday
+            const dayOfWeekHebrew = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'][dayOfWeek];
+            
+            const specificAvailability = contractorAvailabilities.find(av => 
+                av.contractor_id === manualData.contractorId && 
+                av.settlement_name === manualData.settlementName
+            );
+
+            let isAvailable = false;
+            let availabilityReason = "";
+
+            if (specificAvailability) {
+                // Check against specific availability
+                const isDayAvailable = specificAvailability.days_of_week?.includes(dayOfWeekHebrew);
+                if (!isDayAvailable) {
+                    availabilityReason = `הקבלן אינו זמין ביישוב זה ביום ${dayOfWeekHebrew} (הזמינות הספציפית היא לימים: ${specificAvailability.days_of_week?.join(', ') || 'אין ימים מוגדרים'}).`;
+                } else {
+                    // Day is correct, now check time
+                    if (isSlotWithinRange(manualData.timeSlot, specificAvailability.time_range)) {
+                        isAvailable = true;
+                    } else {
+                        availabilityReason = `הקבלן זמין ביישוב זה ביום ${dayOfWeekHebrew} רק בשעות ${specificAvailability.time_range}.`;
+                    }
+                }
+            } else {
+                // Check against default availability
+                if (contractor.default_hours) {
+                     if (isSlotWithinRange(manualData.timeSlot, contractor.default_hours)) {
+                        isAvailable = true;
+                    } else {
+                        availabilityReason = `שעות הפעילות של הקבלן לפי ברירת מחדל הן ${contractor.default_hours}.`;
+                    }
+                } else {
+                    availabilityReason = 'לקבלן אין שעות זמינות מוגדרות כלל. נא להגדיר זמינות לקבלן זה.';
+                }
+            }
+
+            if (!isAvailable) {
+                alert(`לא ניתן לקבוע תיאום ידני. ${availabilityReason}\n\nתיאום זה דורש התערבות. ניתן להמשיך רק אם ברור שהקבלן אכן יכול לבצע את המשימה בזמן זה.`);
+                setIsCreating(false);
+                return;
+            }
+
+
+            // All checks passed, create appointment
             await Appointment.create({
                 settlement_name: manualData.settlementName,
                 task_type: manualData.taskType,
@@ -541,7 +657,7 @@ export default function Scheduling() {
       const conflictingAppointment = currentAppointments.find(apt => 
         apt.contractor_id === contractorId && // Use contractorId
         apt.appointment_date === slot.date &&
-        apt.status !== 'בוטל' &&
+        apt.status !== 'בוטל' && apt.status !== 'הושלם' &&
         checkTimeSlotOverlap(apt.time_slot, slot.time)
       );
 
@@ -760,6 +876,8 @@ export default function Scheduling() {
                     settlements={settlements} 
                     taskTypes={taskTypes}
                     onAppointmentCreated={redirectToCalendar}
+                    appointments={appointments}
+                    contractorAvailabilities={contractorAvailabilities}
                 />
             ) : (
               <>
