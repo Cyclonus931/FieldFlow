@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, UserCheck, Sparkles, Wand2, Calendar as CalendarIcon, Star, Clock, ShieldAlert, CalendarX, CalendarDays } from 'lucide-react';
 import { createPageUrl } from '@/utils';
-import { usePermissions } from '../components/auth/PermissionGate'; // Removed .jsx extension
+import { usePermissions } from '../components/auth/PermissionGate';
 
 const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCreated, contractorAvailabilities, appointments }) => {
     const [manualData, setManualData] = useState({
@@ -80,8 +80,16 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
             }
 
             const contractor = contractors.find(c => c.contractor_id === manualData.contractorId);
+            const settlement = settlements.find(s => s.name === manualData.settlementName);
+            
             if (!contractor) {
                 alert('שגיאה: קבלן לא נמצא.');
+                setIsCreating(false);
+                return;
+            }
+
+            if (!settlement) {
+                alert('שגיאה: יישוב לא נמצא.');
                 setIsCreating(false);
                 return;
             }
@@ -103,7 +111,7 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
                 return;
             }
 
-            // 2. Check for contractor availability rules
+            // 2. Check settlement arrival days first
             const selectedDateObj = parseDateStringAsLocal(manualData.date);
             if (!selectedDateObj) {
                 alert('תאריך שנבחר אינו תקין.');
@@ -113,32 +121,50 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
             const dayOfWeek = selectedDateObj.getDay(); // 0=Sunday, 6=Saturday
             const dayOfWeekHebrew = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'][dayOfWeek];
             
-            const specificAvailability = contractorAvailabilities.find(av => 
+            // Check if settlement allows arrivals on this day
+            if (settlement.arrival_days && settlement.arrival_days.length > 0) {
+                if (!settlement.arrival_days.includes(dayOfWeekHebrew)) {
+                    const allowedDays = settlement.arrival_days.join(', ');
+                    alert(`היישוב "${settlement.name}" אינו מקבל הגעות ביום ${dayOfWeekHebrew}. ימי ההגעה המותרים: ${allowedDays}`);
+                    setIsCreating(false);
+                    return;
+                }
+            }
+
+            // 3. Check for contractor availability rules
+            const specificAvailabilities = contractorAvailabilities.filter(av => 
                 av.contractor_id === manualData.contractorId && 
                 av.settlement_name === manualData.settlementName
             );
 
             let isAvailable = false;
             let availabilityReason = "";
+            let usedAvailabilityRule = "";
 
-            if (specificAvailability) {
-                // Check against specific availability
-                const isDayAvailable = specificAvailability.days_of_week?.includes(dayOfWeekHebrew);
-                if (!isDayAvailable) {
-                    availabilityReason = `הקבלן אינו זמין ביישוב זה ביום ${dayOfWeekHebrew} (הזמינות הספציפית היא לימים: ${specificAvailability.days_of_week?.join(', ') || 'אין ימים מוגדרים'}).`;
+            if (specificAvailabilities.length > 0) {
+                // Check against specific availabilities - find one that matches this day
+                const matchingAvailability = specificAvailabilities.find(av => 
+                    av.days_of_week?.includes(dayOfWeekHebrew)
+                );
+
+                if (!matchingAvailability) {
+                    const allSpecificDays = [...new Set(specificAvailabilities.flatMap(av => av.days_of_week || []))];
+                    availabilityReason = `הקבלן אינו זמין ביישוב זה ביום ${dayOfWeekHebrew} (הזמינות הספציפית היא לימים: ${allSpecificDays.join(', ') || 'לא מוגדרים'}).`;
                 } else {
                     // Day is correct, now check time
-                    if (isSlotWithinRange(manualData.timeSlot, specificAvailability.time_range)) {
+                    if (isSlotWithinRange(manualData.timeSlot, matchingAvailability.time_range)) {
                         isAvailable = true;
+                        usedAvailabilityRule = `זמינות ספציפית: ${matchingAvailability.days_of_week?.join(',')} בשעות ${matchingAvailability.time_range}`;
                     } else {
-                        availabilityReason = `הקבלן זמין ביישוב זה ביום ${dayOfWeekHebrew} רק בשעות ${specificAvailability.time_range}.`;
+                        availabilityReason = `הקבלן זמין ביישוב זה ביום ${dayOfWeekHebrew} רק בשעות ${matchingAvailability.time_range}.`;
                     }
                 }
             } else {
-                // Check against default availability
+                // No specific availability - check against default availability
                 if (contractor.default_hours) {
                      if (isSlotWithinRange(manualData.timeSlot, contractor.default_hours)) {
                         isAvailable = true;
+                        usedAvailabilityRule = `זמינות ברירת מחדל: ${contractor.default_hours}`;
                     } else {
                         availabilityReason = `שעות הפעילות של הקבלן לפי ברירת מחדל הן ${contractor.default_hours}.`;
                     }
@@ -153,7 +179,6 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
                 return;
             }
 
-
             // All checks passed, create appointment
             await Appointment.create({
                 settlement_name: manualData.settlementName,
@@ -164,7 +189,7 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
                 time_slot: manualData.timeSlot,
                 status: 'מתוכנן',
                 manager_approval: true, // Manual appointments are always with manager approval
-                notes: 'תיאום ידני ע"י מנהל'
+                notes: `תיאום ידני ע"י מנהל. ${usedAvailabilityRule}`
             });
             alert('התיאום הידני נוצר בהצלחה!');
             onAppointmentCreated(); // Redirect to calendar or refresh data
@@ -207,7 +232,9 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
                 <div>
                     <Label htmlFor="manualTaskType">בחר סוג פק"ע</Label>
                     <Select onValueChange={(val) => setManualData(d => ({...d, taskType: val}))} value={manualData.taskType}>
-                        <SelectTrigger id="manualTaskType"><SelectValue placeholder="בחר סוג פק&quot;ע" /></SelectTrigger>
+                        <SelectTrigger id="manualTaskType">
+                            <SelectValue placeholder="בחר סוג פק&quot;ע" />
+                        </SelectTrigger>
                         <SelectContent>
                             {taskTypes.filter(t => t.type_name).map(t => (
                                 <SelectItem key={t.id} value={t.type_name}>{t.type_name}</SelectItem>
@@ -385,7 +412,7 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
     return Math.round(Math.abs((date1.getTime() - date2.getTime()) / oneDay));
   };
   
-  // פונקציית עזר ליצירת ודירוג סלוטים עבור קבלן
+  // פונקציית עזר ליצירת ודירוג סלוטים עבור קבלן - IMPROVED
   const generateAndScoreSlotsForContractor = (contractor) => {
     const scoredSlots = [];
     let currentDate = new Date(searchStartDate);
@@ -410,8 +437,17 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
       
       const dayOfWeekHebrew = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'][dayOfWeek];
       
-      // *** לוגיקה קריטית מתוקנת: כיבוד זמינות ספציפית ***
-      const specificAvailability = contractorAvailabilities.find(av => 
+      // *** FIXED: Check settlement arrival days first ***
+      if (settlement.arrival_days && settlement.arrival_days.length > 0) {
+        if (!settlement.arrival_days.includes(dayOfWeekHebrew)) {
+          console.log(`🚫 יישוב ${settlement.name} אינו מקבל הגעות ביום ${dayOfWeekHebrew}`);
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
+      }
+      
+      // *** FIXED: Use filter instead of find for multiple availability records ***
+      const specificAvailabilities = contractorAvailabilities.filter(av => 
           av.contractor_id === contractor.contractor_id && 
           av.settlement_name === settlement.name
       );
@@ -419,52 +455,59 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
       let availableHours = null;
       let reasonForHours = "";
 
-      if (specificAvailability) {
-          // אם יש זמינות ספציפית, בדוק אם היום הנוכחי כלול
-          if (specificAvailability.days_of_week?.includes(dayOfWeekHebrew)) {
-              availableHours = specificAvailability.time_range;
+      if (specificAvailabilities.length > 0) {
+          // Check if any of the specific availabilities include this day
+          const matchingAvailability = specificAvailabilities.find(av => 
+              av.days_of_week?.includes(dayOfWeekHebrew)
+          );
+
+          if (matchingAvailability) {
+              availableHours = matchingAvailability.time_range;
               reasonForHours = "זמינות ספציפית ליישוב";
           } else {
-              // אם יש זמינות ספציפית אבל היום הנוכחי לא כלול, הקבלן לא זמין
-              console.log(`🚫 ${contractor.name} לא זמין ב-${settlement.name} ביום ${dayOfWeekHebrew} (זמינות ספציפית: ${specificAvailability.days_of_week?.join(', ')})`);
+              // None of the specific availabilities include this day for this date
+              const allSpecificDays = [...new Set(specificAvailabilities.flatMap(av => av.days_of_week || []))];
+              console.log(`🚫 ${contractor.name} לא זמין ב-${settlement.name} ביום ${dayOfWeekHebrew} (זמינות ספציפית: ${allSpecificDays.join(', ') || 'לא מוגדרים'})`);
               currentDate.setDate(currentDate.getDate() + 1);
-              continue; // דלג ליום הבא עבור קבלן זה
+              continue;
           }
       } else {
-          // אם אין זמינות ספציפית, השתמש בזמינות ברירת המחדל
+          // No specific availability - use default hours
           availableHours = contractor.default_hours;
           reasonForHours = "זמינות ברירת מחדל";
       }
 
-      // אם אין שעות זמינות (לא אמור לקרות אחרי התיקון למעלה), דלג על היום
+      // אם אין שעות זמינות (יכול לקרות אם לא מוגדרות שעות ברירת מחדל), דלג על היום
       if (!availableHours) {
         currentDate.setDate(currentDate.getDate() + 1);
         continue;
       }
 
-        const [start, end] = availableHours.split('-');
-        if (!start || !end) {
-          currentDate.setDate(currentDate.getDate() + 1);
-          continue;
+      const [start, end] = availableHours.split('-');
+      if (!start || !end) { // Ensure time range is valid
+        currentDate.setDate(currentDate.getDate() + 1);
+        continue;
+      }
+
+      const startHour = parseInt(start.split(':')[0]);
+      const endHour = parseInt(end.split(':')[0]);
+
+      for (let hour = startHour; hour <= endHour - 2; hour++) { // Assuming 2-hour slots
+        const slotTime = `${String(hour).padStart(2, '0')}:00-${String(hour + 2).padStart(2, '0')}:00`;
+        const isBusy = contractorAppointmentsByDate[currentDateStr]?.some(apt => checkTimeSlotOverlap(apt.time_slot, slotTime));
+        
+        if (!isBusy) {
+            // דירוג הסלוט
+            let slotScore = 100;
+            slotScore -= daysBetween(searchStartDate, currentDate); // עדיפות לתאריכים קרובים
+            if (hour < 12) slotScore += 10; // בונוס לבוקר
+            // This bonus could be tricky if it conflicts with real availability needs.
+            // Consider if a contractor is 'working' on a day but only has one appt - this bonus makes sense.
+            if (contractorAppointmentsByDate[currentDateStr] && contractorAppointmentsByDate[currentDateStr].length > 0) slotScore += 50; // בונוס לניצול יום
+
+            scoredSlots.push({ date: currentDateStr, time: slotTime, score: slotScore });
         }
-
-        const startHour = parseInt(start.split(':')[0]);
-        const endHour = parseInt(end.split(':')[0]);
-
-        for (let hour = startHour; hour <= endHour - 2; hour++) {
-          const slotTime = `${String(hour).padStart(2, '0')}:00-${String(hour + 2).padStart(2, '0')}:00`;
-          const isBusy = contractorAppointmentsByDate[currentDateStr]?.some(apt => checkTimeSlotOverlap(apt.time_slot, slotTime));
-          
-          if (!isBusy) {
-              // דירוג הסלוט
-              let slotScore = 100;
-              slotScore -= daysBetween(searchStartDate, currentDate); // עדיפות לתאריכים קרובים
-              if (hour < 12) slotScore += 10; // בונוס לבוקר
-              if (contractorAppointmentsByDate[currentDateStr] && contractorAppointmentsByDate[currentDateStr].length > 0) slotScore += 50; // בונוס לניצול יום
-
-              scoredSlots.push({ date: currentDateStr, time: slotTime, score: slotScore });
-          }
-        }
+      }
       
       currentDate.setDate(currentDate.getDate() + 1);
     }
@@ -709,7 +752,7 @@ export default function Scheduling() {
       return formatDateLocal(today); // מנהל יכול לבחור מהיום רק אם סומן "אישור מנהל"
     } else {
       const tomorrow = new Date(today.getTime() + (24 * 60 * 60 * 1000));
-      return formatDateLocal(tomorrow); // נציג רגיל או מנהל ללא "אישור מנהל" - מחר ואילך בלבד
+      return formatDateLocal(tomorrow); // נציג רגיל או מנהל ללא "אישור מנהל" - מ tomorrow ואילך בלבד
     }
   };
 
