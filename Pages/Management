@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { User } from '@/entities/User';
 import { Card, CardContent } from '@/components/ui/card';
@@ -11,6 +12,7 @@ import ContractorAvailabilityManager from '../components/management/ContractorAv
 import TaskTypeManager from '../components/management/TaskTypeManager';
 import UserManager from '../components/management/UserManager';
 import BusinessDayHolidayManager from '../components/management/BusinessDayHolidayManager';
+import { PermissionGate } from '../components/auth/PermissionGate';
 
 function ComingSoonTab({ title, icon: Icon }) {
     return (
@@ -47,80 +49,68 @@ export default function Management() {
     );
   }
 
-  if (user?.role !== 'admin') {
-    return (
-      <div className="p-8">
-        <Alert variant="destructive">
-          <ShieldAlert className="h-4 w-4" />
-          <AlertTitle>אין לך הרשאה</AlertTitle>
-          <AlertDescription>
-            עמוד זה זמין למנהלי מערכת בלבד.
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-6 space-y-6 bg-gradient-to-br from-blue-50 to-green-50 min-h-screen">
-      <h1 className="text-3xl font-bold text-gray-900">ניהול מערכת</h1>
-      
-      <Tabs defaultValue="settlements" className="w-full">
-        <TabsList className="grid w-full grid-cols-7 bg-white/60 p-2 h-auto rounded-xl shadow-sm">
-          <TabsTrigger value="settlements" className="flex items-center gap-2 py-2"><MapPin className="w-4 h-4"/> יישובים</TabsTrigger>
-          <TabsTrigger value="contractors" className="flex items-center gap-2 py-2"><Users className="w-4 h-4"/> קבלנים</TabsTrigger>
-          <TabsTrigger value="availability" className="flex items-center gap-2 py-2"><Clock className="w-4 h-4"/> זמינות ספציפית</TabsTrigger>
-          <TabsTrigger value="tasks" className="flex items-center gap-2 py-2"><Wrench className="w-4 h-4"/> פק"עות</TabsTrigger>
-          <TabsTrigger value="users" className="flex items-center gap-2 py-2"><UserCog className="w-4 h-4"/> משתמשים</TabsTrigger>
-          <TabsTrigger value="business-days-holidays" className="flex items-center gap-2 py-2"><CalendarDays className="w-4 h-4"/> ימי עסקים וחגים</TabsTrigger>
-          <TabsTrigger value="api-keys" className="flex items-center gap-2 py-2"><KeyRound className="w-4 h-4"/> מפתחות API</TabsTrigger>
-        </TabsList>
-        <TabsContent value="settlements" className="mt-6">
-            <Card className="bg-white/80 backdrop-blur border-blue-200">
-                <CardContent className="p-6">
-                    <SettlementManager />
-                </CardContent>
-            </Card>
-        </TabsContent>
-        <TabsContent value="contractors" className="mt-6">
-            <Card className="bg-white/80 backdrop-blur border-blue-200">
-                <CardContent className="p-6">
-                    <ContractorManager />
-                </CardContent>
-            </Card>
-        </TabsContent>
-        <TabsContent value="availability" className="mt-6">
-            <Card className="bg-white/80 backdrop-blur border-blue-200">
-                <CardContent className="p-6">
-                    <ContractorAvailabilityManager />
-                </CardContent>
-            </Card>
-        </TabsContent>
-        <TabsContent value="tasks" className="mt-6">
-            <Card className="bg-white/80 backdrop-blur border-blue-200">
-                <CardContent className="p-6">
-                    <TaskTypeManager />
-                </CardContent>
-            </Card>
-        </TabsContent>
-        <TabsContent value="users" className="mt-6">
-            <Card className="bg-white/80 backdrop-blur border-blue-200">
-                <CardContent className="p-6">
-                    <UserManager />
-                </CardContent>
-            </Card>
-        </TabsContent>
-        <TabsContent value="business-days-holidays" className="mt-6">
-            <Card className="bg-white/80 backdrop-blur border-blue-200">
-                <CardContent className="p-6">
-                    <BusinessDayHolidayManager />
-                </CardContent>
-            </Card>
-        </TabsContent>
-        <TabsContent value="api-keys" className="mt-6">
-            <ApiKeyManager />
-        </TabsContent>
-      </Tabs>
-    </div>
+    <PermissionGate requiredRole="admin">
+      <div className="p-6 space-y-6 bg-gradient-to-br from-blue-50 to-green-50 min-h-screen">
+        <h1 className="text-3xl font-bold text-gray-900">ניהול מערכת</h1>
+        
+        <Tabs defaultValue="settlements" className="w-full">
+          <TabsList className="grid w-full grid-cols-7 bg-white/60 p-2 h-auto rounded-xl shadow-sm">
+            <TabsTrigger value="settlements" className="flex items-center gap-2 py-2"><MapPin className="w-4 h-4"/> יישובים</TabsTrigger>
+            <TabsTrigger value="contractors" className="flex items-center gap-2 py-2"><Users className="w-4 h-4"/> קבלנים</TabsTrigger>
+            <TabsTrigger value="availability" className="flex items-center gap-2 py-2"><Clock className="w-4 h-4"/> זמינות ספציפית</TabsTrigger>
+            <TabsTrigger value="tasks" className="flex items-center gap-2 py-2"><Wrench className="w-4 h-4"/> פק"עות</TabsTrigger>
+            <TabsTrigger value="users" className="flex items-center gap-2 py-2"><UserCog className="w-4 h-4"/> משתמשים</TabsTrigger>
+            <TabsTrigger value="business-days-holidays" className="flex items-center gap-2 py-2"><CalendarDays className="w-4 h-4"/> ימי עסקים וחגים</TabsTrigger>
+            <TabsTrigger value="api-keys" className="flex items-center gap-2 py-2"><KeyRound className="w-4 h-4"/> מפתחות API</TabsTrigger>
+          </TabsList>
+          <TabsContent value="settlements" className="mt-6">
+              <Card className="bg-white/80 backdrop-blur border-blue-200">
+                  <CardContent className="p-6">
+                      <SettlementManager />
+                  </CardContent>
+              </Card>
+          </TabsContent>
+          <TabsContent value="contractors" className="mt-6">
+              <Card className="bg-white/80 backdrop-blur border-blue-200">
+                  <CardContent className="p-6">
+                      <ContractorManager />
+                  </CardContent>
+              </Card>
+          </TabsContent>
+          <TabsContent value="availability" className="mt-6">
+              <Card className="bg-white/80 backdrop-blur border-blue-200">
+                  <CardContent className="p-6">
+                      <ContractorAvailabilityManager />
+                  </CardContent>
+              </Card>
+          </TabsContent>
+          <TabsContent value="tasks" className="mt-6">
+              <Card className="bg-white/80 backdrop-blur border-blue-200">
+                  <CardContent className="p-6">
+                      <TaskTypeManager />
+                  </CardContent>
+              </Card>
+          </TabsContent>
+          <TabsContent value="users" className="mt-6">
+              <Card className="bg-white/80 backdrop-blur border-blue-200">
+                  <CardContent className="p-6">
+                      <UserManager />
+                  </CardContent>
+              </Card>
+          </TabsContent>
+          <TabsContent value="business-days-holidays" className="mt-6">
+              <Card className="bg-white/80 backdrop-blur border-blue-200">
+                  <CardContent className="p-6">
+                      <BusinessDayHolidayManager />
+                  </CardContent>
+              </Card>
+          </TabsContent>
+          <TabsContent value="api-keys" className="mt-6">
+              <ApiKeyManager />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </PermissionGate>
   );
 }

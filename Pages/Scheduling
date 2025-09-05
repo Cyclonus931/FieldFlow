@@ -1,0 +1,858 @@
+
+import React, { useState, useEffect } from 'react';
+import { Settlement } from '@/entities/Settlement';
+import { TaskType } from '@/entities/TaskType';
+import { Contractor } from '@/entities/Contractor';
+import { ContractorAvailability } from '@/entities/ContractorAvailability';
+import { Appointment } from '@/entities/Appointment';
+import { BlackoutDate } from '@/entities/BlackoutDate';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, UserCheck, Sparkles, Wand2, Calendar as CalendarIcon, Star, Clock, ShieldAlert, CalendarX, CalendarDays } from 'lucide-react';
+import { createPageUrl } from '@/utils';
+import { usePermissions } from '../components/auth/PermissionGate'; // New import
+
+const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCreated }) => {
+    const [manualData, setManualData] = useState({
+        contractorId: '',
+        settlementName: '',
+        taskType: '',
+        date: '',
+        timeSlot: '08:00-10:00'
+    });
+    const [isCreating, setIsCreating] = useState(false);
+
+    const handleCreate = async () => {
+        setIsCreating(true);
+        try {
+            if (!manualData.contractorId || !manualData.settlementName || !manualData.taskType || !manualData.date || !manualData.timeSlot) {
+                alert('יש למלא את כל השדות לתיאום ידני.');
+                setIsCreating(false);
+                return;
+            }
+
+            const contractor = contractors.find(c => c.contractor_id === manualData.contractorId);
+            await Appointment.create({
+                settlement_name: manualData.settlementName,
+                task_type: manualData.taskType,
+                contractor_id: manualData.contractorId,
+                contractor_name: contractor?.name || 'לא ידוע',
+                appointment_date: manualData.date,
+                time_slot: manualData.timeSlot,
+                status: 'מתוכנן',
+                manager_approval: true, // Manual appointments are always with manager approval
+                notes: 'תיאום ידני ע"י מנהל'
+            });
+            alert('התיאום הידני נוצר בהצלחה!');
+            onAppointmentCreated(); // Redirect to calendar or refresh data
+        } catch (error) {
+            console.error("שגיאה ביצירת תיאום ידני:", error);
+            alert('שגיאה ביצירת התיאום. נא לנסות שוב.');
+        } finally {
+            setIsCreating(false);
+        }
+    };
+
+    return (
+        <Card className="bg-red-50 border-red-200">
+            <CardHeader>
+                <CardTitle className="text-red-700">תיאום ידני (מנהל)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div>
+                    <Label htmlFor="manualContractor">בחר קבלן</Label>
+                    <Select onValueChange={(val) => setManualData(d => ({...d, contractorId: val}))} value={manualData.contractorId}>
+                        <SelectTrigger id="manualContractor"><SelectValue placeholder="בחר קבלן" /></SelectTrigger>
+                        <SelectContent>
+                            {contractors.filter(c => c.contractor_id && c.name).map(c => (
+                                <SelectItem key={c.id} value={c.contractor_id}>{c.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label htmlFor="manualSettlement">בחר יישוב</Label>
+                    <Select onValueChange={(val) => setManualData(d => ({...d, settlementName: val}))} value={manualData.settlementName}>
+                        <SelectTrigger id="manualSettlement"><SelectValue placeholder="בחר יישוב" /></SelectTrigger>
+                        <SelectContent>
+                            {settlements.filter(s => s.name).map(s => (
+                                <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label htmlFor="manualTaskType">בחר סוג פק"ע</Label>
+                    <Select onValueChange={(val) => setManualData(d => ({...d, taskType: val}))} value={manualData.taskType}>
+                        <SelectTrigger id="manualTaskType"><SelectValue placeholder="בחר סוג פק&quot;ע" /></SelectTrigger>
+                        <SelectContent>
+                            {taskTypes.filter(t => t.type_name).map(t => (
+                                <SelectItem key={t.id} value={t.type_name}>{t.type_name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label htmlFor="manualDate">תאריך</Label>
+                    <Input id="manualDate" type="date" value={manualData.date} onChange={(e) => setManualData(d => ({...d, date: e.target.value}))}/>
+                </div>
+                <div>
+                    <Label htmlFor="manualTimeSlot">שעות</Label>
+                    <Input id="manualTimeSlot" type="text" placeholder="שעות, למשל 08:00-10:00" value={manualData.timeSlot} onChange={(e) => setManualData(d => ({...d, timeSlot: e.target.value}))} />
+                </div>
+                <Button onClick={handleCreate} disabled={isCreating} className="w-full bg-red-600 hover:bg-red-700">
+                    {isCreating ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/>יוצר...</> : 'צור תיאום בכפייה'}
+                </Button>
+            </CardContent>
+        </Card>
+    );
+};
+
+// חישוב מרחק בין שתי נקודות - Unchanged
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+// פונקציה לפורמט תאריך מקומי ללא הזזות timezone
+const formatDateLocal = (d) => {
+  const tzOffset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - tzOffset).toISOString().split('T')[0];
+};
+
+// פונקציה להוספת ימי עסקים לתאריך
+const addBusinessDays = (startDate, days, blackoutDatesSet) => {
+  let currentDate = new Date(startDate);
+  let addedDays = 0;
+  
+  while (addedDays < days) {
+    currentDate.setDate(currentDate.getDate() + 1);
+    const dayOfWeek = currentDate.getDay(); // 0=Sunday, 6=Saturday - תיקון timezone
+    const dateString = formatDateLocal(currentDate);
+
+    // דלג על שישי, שבת או ימי חג/שבתון
+    if (dayOfWeek !== 5 && dayOfWeek !== 6 && !blackoutDatesSet.has(dateString)) {
+      addedDays++;
+    }
+  }
+  return currentDate;
+};
+
+// פונקציה למציאת יום העסקים הבא
+const getNextBusinessDay = (fromDate, blackoutDatesSet) => {
+  let currentDate = new Date(fromDate);
+  
+  // התחל מהיום שאחרי fromDate
+  while (true) {
+    currentDate.setDate(currentDate.getDate() + 1);
+    const dayOfWeek = currentDate.getDay(); // 0=Sunday, 6=Saturday - תיקון timezone
+    const dateString = formatDateLocal(currentDate);
+    
+    // אם זה לא שישי/שבת ולא חג - זה יום עסקים תקין
+    if (dayOfWeek !== 5 && dayOfWeek !== 6 && !blackoutDatesSet.has(dateString)) {
+      break;
+    }
+  }
+  
+  return currentDate;
+};
+
+// Helper function to parse HH:MM string to minutes from midnight
+const parseTimeToMinutes = (timeStr) => {
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  return hours * 60 + minutes;
+};
+
+// פונקציה לבדיקת חפיפת זמנים - חייבת להיות לפני generateContractorSlots
+const checkTimeSlotOverlap = (slot1, slot2) => {
+  const [s1_start_str, s1_end_str] = slot1.split('-');
+  const [s2_start_str, s2_end_str] = slot2.split('-');
+
+  const s1_start = parseTimeToMinutes(s1_start_str);
+  const s1_end = parseTimeToMinutes(s1_end_str);
+  const s2_start = parseTimeToMinutes(s2_start_str);
+  const s2_end = parseTimeToMinutes(s2_end_str);
+
+  // Overlap occurs if (start1 < end2) AND (start2 < end1)
+  return s1_start < s2_end && s2_start < s1_end;
+};
+
+// פונקציה ליצירת תאריך מקומי מתוך מחרוזת תאריך, מטפלת בבעיות timezone
+const parseDateStringAsLocal = (dateString) => {
+  if (!dateString) return null;
+  // קלט מסוג date input הוא תמיד בפורמט YYYY-MM-DD
+  const parts = dateString.split('-').map(part => parseInt(part, 10));
+  // יצירת תאריך לפי זמן מקומי כדי למנוע הזזות timezone
+  // new Date(year, monthIndex, day)
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+};
+
+
+// אלגוריתם התיאום החכם המתקדם
+const getSmartScheduling = async (params, settlements, contractors, contractorAvailabilities, appointments, taskTypes, blackoutDates) => {
+  const { settlementId, taskTypeId, managerApproval, specificDate } = params;
+  
+  const settlement = settlements.find(s => s.id === settlementId);
+  const taskType = taskTypes.find(t => t.id === taskTypeId);
+  
+  if (!settlement || !taskType) {
+    console.log("❌ לא נמצא יישוב או סוג פק\"ע");
+    return [];
+  }
+
+  const blackoutDatesSet = new Set(blackoutDates.map(d => d.date));
+  const activeAppointments = appointments.filter(apt => apt.status !== 'בוטל');
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  let searchStartDate;
+  if (specificDate) {
+    searchStartDate = parseDateStringAsLocal(specificDate);
+    if (!searchStartDate) {
+      console.error("❌ תאריך ספציפי לא תקין:", specificDate);
+      return [];
+    }
+
+    const slaDeadline = addBusinessDays(today, taskType.sla_days, blackoutDatesSet);
+    if (!managerApproval && searchStartDate <= slaDeadline) {
+      return [{ requiresManagerApproval: true }];
+    }
+  } else {
+    searchStartDate = getNextBusinessDay(today, blackoutDatesSet);
+  }
+  
+  let searchEndDate;
+  if (specificDate) {
+    searchEndDate = new Date(searchStartDate);
+  } else {
+    const slaDeadline = addBusinessDays(today, taskType.sla_days, blackoutDatesSet);
+    searchEndDate = slaDeadline;
+  }
+  searchEndDate.setHours(23, 59, 59, 999);
+  searchStartDate.setHours(0,0,0,0);
+
+
+  // 1. סינון קבלנים שזכאים גאוגרפית ותפקודית
+  const eligibleContractors = contractors.filter(c => {
+    const isGeographicallyCovered = 
+        c.regions?.includes(settlement.region) ||
+        c.sub_regions?.includes(settlement.sub_region) ||
+        c.priority_settlements?.includes(settlement.name);
+
+    const isTaskEligible = managerApproval || c.task_types?.includes(taskType.type_name);
+
+    return c.active && isTaskEligible && isGeographicallyCovered;
+  });
+
+  if (eligibleContractors.length === 0) {
+    console.log("❌ לא נמצאו קבלנים זכאים ליישוב ולסוג הפק\"ע");
+    return [];
+  }
+
+  // פונקציית עזר לחישוב מרחק בימים
+  const daysBetween = (date1, date2) => {
+    const oneDay = 1000 * 60 * 60 * 24;
+    return Math.round(Math.abs((date1.getTime() - date2.getTime()) / oneDay));
+  };
+  
+  // פונקציית עזר ליצירת ודירוג סלוטים עבור קבלן
+  const generateAndScoreSlotsForContractor = (contractor) => {
+    const scoredSlots = [];
+    let currentDate = new Date(searchStartDate);
+    
+    const contractorAppointmentsByDate = activeAppointments
+      .filter(apt => apt.contractor_id === contractor.contractor_id)
+      .reduce((acc, apt) => {
+        (acc[apt.appointment_date] = acc[apt.appointment_date] || []).push(apt);
+        return acc;
+      }, {});
+
+    while (currentDate <= searchEndDate) {
+      const dayOfWeek = currentDate.getDay();
+      const currentDateStr = formatDateLocal(currentDate);
+
+      const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
+      const isBlackout = blackoutDatesSet.has(currentDateStr);
+      if ((isWeekend || isBlackout) && !managerApproval) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        continue;
+      }
+      
+      const dayOfWeekHebrew = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'][dayOfWeek];
+      
+      // *** לוגיקה קריטית מתוקנת: כיבוד זמינות ספציפית ***
+      const specificAvailability = contractorAvailabilities.find(av => 
+          av.contractor_id === contractor.contractor_id && 
+          av.settlement_name === settlement.name
+      );
+
+      let availableHours = null;
+      let reasonForHours = "";
+
+      if (specificAvailability) {
+          // אם יש זמינות ספציפית, בדוק אם היום הנוכחי כלול
+          if (specificAvailability.days_of_week?.includes(dayOfWeekHebrew)) {
+              availableHours = specificAvailability.time_range;
+              reasonForHours = "זמינות ספציפית ליישוב";
+          } else {
+              // אם יש זמינות ספציפית אבל היום הנוכחי לא כלול, הקבלן לא זמין
+              console.log(`🚫 ${contractor.name} לא זמין ב-${settlement.name} ביום ${dayOfWeekHebrew} (זמינות ספציפית: ${specificAvailability.days_of_week?.join(', ')})`);
+              currentDate.setDate(currentDate.getDate() + 1);
+              continue; // דלג ליום הבא עבור קבלן זה
+          }
+      } else {
+          // אם אין זמינות ספציפית, השתמש בזמינות ברירת המחדל
+          availableHours = contractor.default_hours;
+          reasonForHours = "זמינות ברירת מחדל";
+      }
+
+      // אם אין שעות זמינות (לא אמור לקרות אחרי התיקון למעלה), דלג על היום
+      if (!availableHours) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        continue;
+      }
+
+        const [start, end] = availableHours.split('-');
+        if (!start || !end) {
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
+
+        const startHour = parseInt(start.split(':')[0]);
+        const endHour = parseInt(end.split(':')[0]);
+
+        for (let hour = startHour; hour <= endHour - 2; hour++) {
+          const slotTime = `${String(hour).padStart(2, '0')}:00-${String(hour + 2).padStart(2, '0')}:00`;
+          const isBusy = contractorAppointmentsByDate[currentDateStr]?.some(apt => checkTimeSlotOverlap(apt.time_slot, slotTime));
+          
+          if (!isBusy) {
+              // דירוג הסלוט
+              let slotScore = 100;
+              slotScore -= daysBetween(searchStartDate, currentDate); // עדיפות לתאריכים קרובים
+              if (hour < 12) slotScore += 10; // בונוס לבוקר
+              if (contractorAppointmentsByDate[currentDateStr] && contractorAppointmentsByDate[currentDateStr].length > 0) slotScore += 50; // בונוס לניצול יום
+
+              scoredSlots.push({ date: currentDateStr, time: slotTime, score: slotScore });
+          }
+        }
+      
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    // החזרת כל הסלוטים ממוינים לפי הציון שלהם
+    return scoredSlots.sort((a, b) => b.score - a.score);
+  };
+
+  // 2. חישוב ציון לכל קבלן ואיסוף הסלוטים המובילים שלו
+  const scoredContractors = eligibleContractors.map(contractor => {
+    let score = 100;
+    let reasons = [];
+
+    // ציון גאוגרפי
+    if (contractor.priority_settlements?.includes(settlement.name)) {
+      score += 200; reasons.push('קבלן ייעודי ליישוב');
+    } else if (settlement.sub_region && contractor.sub_regions?.includes(settlement.sub_region)) {
+      score += 150; reasons.push('מתמחה בתת-אזור');
+    } else if (settlement.region && contractor.regions?.includes(settlement.region)) {
+      score += 100; reasons.push('מתמחה באזור');
+    }
+    
+    // ציון עדיפות
+    const priorityScores = { 'גבוה': 50, 'רגיל': 25, 'נמוך': 0 };
+    score += priorityScores[contractor.priority] || 10; // Default to 10 if priority is undefined or 'נמוך'
+    if((priorityScores[contractor.priority] || 0) > 0) reasons.push(`עדיפות ${contractor.priority}`);
+
+    const allAvailableSlots = generateAndScoreSlotsForContractor(contractor);
+    
+    // בונוס על ניצול יום עבודה קיים
+    const contractorAppointmentsByDate = activeAppointments
+      .filter(apt => apt.contractor_id === contractor.contractor_id)
+      .reduce((acc, apt) => {
+        (acc[apt.appointment_date] = acc[apt.appointment_date] || []).push(apt);
+        return acc;
+      }, {});
+
+    if (allAvailableSlots.some(slot => contractorAppointmentsByDate[slot.date] && contractorAppointmentsByDate[slot.date].length > 0)) {
+        score += 100;
+        reasons.push('ניצול יום עבודה');
+    }
+    
+    return {
+      contractor,
+      score: Math.max(0, Math.round(score)),
+      reasons: [...new Set(reasons)], // Ensure unique reasons
+      slots: allAvailableSlots.slice(0, 3) // הצג עד 3 סלוטים מועדפים
+    };
+  }).filter(c => c.slots.length > 0); // סנן החוצה קבלנים ללא סלוטים זמינים
+
+  // 3. מיון סופי של הקבלנים והחזרת 3 המובילים
+  return scoredContractors.sort((a, b) => b.score - a.score).slice(0, 3);
+};
+
+export default function Scheduling() {
+  const { user, loading: userLoading, isAdmin } = usePermissions(); // Updated: use usePermissions hook
+  const [settlements, setSettlements] = useState([]);
+  const [taskTypes, setTaskTypes] = useState([]);
+  const [contractors, setContractors] = useState([]);
+  const [contractorAvailabilities, setContractorAvailabilities] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [blackoutDates, setBlackoutDates] = useState([]);
+  const [loading, setLoading] = useState(true); // This loading state is for initial data fetch, distinct from userLoading
+
+  // Form state
+  const [selectedSettlement, setSelectedSettlement] = useState('');
+  const [selectedTaskType, setSelectedTaskType] = useState('');
+  const [taskNumber, setTaskNumber] = useState('');
+  const [managerApproval, setManagerApproval] = useState(false);
+  const [selectedDate, setSelectedDate] = useState('');
+
+  // Results state
+  const [isSearching, setIsSearching] = useState(false);
+  const [suggestedContractors, setSuggestedContractors] = useState([]); // This will now hold the enriched contractor objects
+  const [error, setError] = useState(null);
+  const [showManagerApprovalAlert, setShowManagerApprovalAlert] = useState(false);
+  const [submittedSearch, setSubmittedSearch] = useState(false); // New state to track if a search was submitted
+
+  useEffect(() => {
+    // Only load initial data if user permissions are loaded and user exists
+    if (!userLoading && user) {
+        loadInitialData();
+    } else if (!userLoading && !user) {
+        // If user is not logged in, set loading to false to show login message
+        setLoading(false);
+    }
+  }, [user, userLoading]); // Depend on user and userLoading
+
+  const loadInitialData = async () => {
+    setLoading(true);
+    try {
+      const [settlementData, taskTypeData, contractorData, availabilityData, appointmentData, blackoutData] = await Promise.all([
+        Settlement.list(),
+        TaskType.list(),
+        Contractor.list(),
+        ContractorAvailability.list(),
+        Appointment.list(),
+        BlackoutDate.list(),
+      ]);
+      setSettlements(settlementData);
+      setTaskTypes(taskTypeData);
+      setContractors(contractorData);
+      setContractorAvailabilities(availabilityData);
+      setAppointments(appointmentData);
+      setBlackoutDates(blackoutData);
+    } catch (err) {
+      console.error("Failed to load initial data", err);
+      setError("שגיאה בטעינת נתונים בסיסיים. נא לרענן את העמוד.");
+    }
+    setLoading(false);
+  };
+  
+  const redirectToCalendar = () => {
+      window.location.href = createPageUrl('Calendar');
+  }
+
+  const handleSearchSlots = async () => {
+    if (!selectedSettlement || !selectedTaskType) {
+      setError("נא לבחור יישוב וסוג פק\"ע.");
+      return;
+    }
+
+    // בדיקת הרשאות לתאריך ספציפי
+    if (selectedDate && !isAdmin) { // Check if a specific date is selected and user is not admin
+      const selectedDateObj = parseDateStringAsLocal(selectedDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Normalize today to start of day for accurate comparison
+      
+      if (!selectedDateObj || selectedDateObj <= today) { // If selected date is today or in the past
+        setError("משתמשים רגילים יכולים לבחור רק תאריכים עתידיים. בחר תאריך מחר ואילך.");
+        return;
+      }
+    }
+    
+    setError(null);
+    setShowManagerApprovalAlert(false);
+    setIsSearching(true);
+    setSuggestedContractors([]);
+    setSubmittedSearch(true); // Mark that a search has been initiated
+    
+    try {
+      const [freshSettlements, freshContractors, freshAvailabilities, freshAppointments, freshBlackoutDates] = await Promise.all([
+        Settlement.list(),
+        Contractor.list(),
+        ContractorAvailability.list(),
+        Appointment.list(),
+        BlackoutDate.list()
+      ]);
+      
+      const params = {
+        settlementId: selectedSettlement,
+        taskTypeId: selectedTaskType,
+        managerApproval,
+        specificDate: selectedDate || null
+      };
+      const results = await getSmartScheduling(
+        params, 
+        freshSettlements, 
+        freshContractors, 
+        freshAvailabilities, 
+        freshAppointments, 
+        taskTypes,
+        freshBlackoutDates
+      );
+
+      if (results.length === 1 && results[0].requiresManagerApproval) {
+        setShowManagerApprovalAlert(true);
+        setSuggestedContractors([]);
+      } else {
+        setSuggestedContractors(results);
+      }
+
+    } catch (err) {
+      console.error("Error finding slots:", err);
+      setError("שגיאה במציאת תיאומים. נא לנסות שוב.");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectSlot = async (contractorFullObject, slot) => {
+    const settlement = settlements.find(s => s.id === selectedSettlement);
+    const taskType = taskTypes.find(t => t.id === selectedTaskType);
+    
+    // Use the contractor_id and name from the full contractor object
+    const contractorId = contractorFullObject.contractor_id;
+    const contractorName = contractorFullObject.name;
+
+    try {
+      const currentAppointments = await Appointment.list();
+      const conflictingAppointment = currentAppointments.find(apt => 
+        apt.contractor_id === contractorId && // Use contractorId
+        apt.appointment_date === slot.date &&
+        apt.status !== 'בוטל' &&
+        checkTimeSlotOverlap(apt.time_slot, slot.time)
+      );
+
+      if (conflictingAppointment) {
+        alert(`הקבלן ${contractorName} כבר תפוס ב-${slot.date} בשעות ${conflictingAppointment.time_slot}. נא לבחור מועד אחר.`);
+        // Refresh suggestions to reflect the newly discovered conflict
+        handleSearchSlots(); 
+        return;
+      }
+    } catch (error) {
+      console.error('שגיאה בבדיקת זמינות:', error);
+      alert('שגיאה בבדיקת זמינות הקבלן. נא לנסות שוב.');
+      return;
+    }
+    
+    const confirmMessage = `אישור תיאום:\n\nיישוב: ${settlement.name}\nסוג פק"ע: ${taskType.type_name}\nקבלן: ${contractorName}\nתאריך: ${new Date(slot.date).toLocaleDateString('he-IL')}\nשעות: ${slot.time}\n\nלאשר תיאום?`;
+    
+    if (window.confirm(confirmMessage)) {
+      try {
+        await Appointment.create({
+          settlement_name: settlement.name,
+          task_type: taskType.type_name,
+          contractor_id: contractorId, // Use contractorId
+          contractor_name: contractorName, // Use contractorName
+          appointment_date: slot.date,
+          time_slot: slot.time,
+          status: 'מתוכנן',
+          notes: taskNumber ? `מספר פק"ע: ${taskNumber}` : '',
+          manager_approval: managerApproval
+        });
+
+        alert('התיאום נוצר בהצלחה!');
+        
+        redirectToCalendar();
+        
+      } catch (error) {
+        console.error('שגיאה ביצירת התיאום:', error);
+        setError('שגיאה ביצירת התיאום. נא לנסות שוב.');
+      }
+    }
+  };
+
+  // חישוב תאריך מינימלי לבחירה
+  const getMinDate = () => {
+    const today = new Date();
+    // Use formatDateLocal for consistency and to avoid timezone issues with UI
+    
+    if (isAdmin && managerApproval) { // Updated: use isAdmin
+      return formatDateLocal(today); // מנהל יכול לבחור מהיום רק אם סומן "אישור מנהל"
+    } else {
+      const tomorrow = new Date(today.getTime() + (24 * 60 * 60 * 1000));
+      return formatDateLocal(tomorrow); // נציג רגיל או מנהל ללא "אישור מנהל" - מחר ואילך בלבד
+    }
+  };
+
+  const renderResults = () => {
+    if (isSearching) {
+      return (
+        <div className="flex flex-col items-center justify-center h-48">
+          <Loader2 className="w-12 h-12 animate-spin text-green-600 mb-4" />
+          <p className="text-lg text-gray-600 text-center">
+            האלגוריתם החכם מחשב את האפשרויות הטובות ביותר...
+          </p>
+          <p className="text-sm text-gray-500 mt-2">
+            מתחשב ב-SLA, עדיפויות קבלנים, זמינות וניצול ימי עבודה
+          </p>
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      );
+    }
+    if (showManagerApprovalAlert) {
+      return (
+        <Alert variant="destructive" className="mb-4 bg-yellow-50 border-yellow-200 text-yellow-800">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>נדרש אישור מנהל</AlertTitle>
+          <AlertDescription>
+            התאריך שנבחר נמצא בטווח ה-SLA. כדי לחפש בתאריך זה, יש לסמן "אישור מנהל".
+          </AlertDescription>
+        </Alert>
+      );
+    }
+    if (suggestedContractors.length === 0 && submittedSearch) {
+      return (
+        <Alert className="mt-4">
+          <CalendarX className="h-4 w-4" />
+          <AlertTitle>לא נמצאו מועדים פנויים</AlertTitle>
+          <AlertDescription>
+            לא נמצאו קבלנים או מועדים זמינים התואמים את בקשתך. נסה לשנות את התאריך או סוג הפק"ע.
+          </AlertDescription>
+        </Alert>
+      );
+    }
+    if (suggestedContractors.length > 0) {
+      return (
+        <div className="space-y-6 pt-4">
+          <h3 className="text-2xl font-bold text-center text-gray-800">מועדים מומלצים</h3>
+          {suggestedContractors.map(({ contractor, score, reasons, slots }, index) => (
+            <Card key={contractor.id} className="border-green-200 bg-white shadow-lg overflow-hidden">
+              <CardHeader className="bg-green-50 p-4 border-b border-green-200">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <UserCheck className="w-6 h-6 text-green-700" />
+                    <h4 className="text-lg font-bold text-green-800">{contractor.name}</h4>
+                  </div>
+                  <Badge variant="outline" className="text-green-700 border-green-300 bg-white">
+                    <Star className="w-3 h-3 mr-1 text-yellow-500 fill-current" /> ציון: {Math.round(score)}
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {reasons.map((reason, i) => (
+                    <Badge key={i} variant="secondary" className="bg-green-100 text-green-800 text-xs">
+                      {reason}
+                    </Badge>
+                  ))}
+                </div>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                {slots.map((slot, slotIndex) => (
+                  <div key={slotIndex} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center gap-4">
+                      <CalendarDays className="w-5 h-5 text-gray-500" />
+                      <div>
+                          <p className="font-semibold text-gray-800">{new Date(slot.date).toLocaleDateString('he-IL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                          <p className="text-sm text-gray-600">{slot.time}</p>
+                      </div>
+                    </div>
+                    <Button onClick={() => handleSelectSlot(contractor, slot)}>
+                      בחר מועד
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div className="text-center text-gray-500 py-16">
+        <CalendarIcon className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+        <p className="text-lg mb-2">התוצאות יופיעו כאן</p>
+        <p className="text-sm">לאחר בחירת יישוב וסוג פק"ע, לחץ על "מצא תיאום אופטימלי"</p>
+      </div>
+    );
+  };
+
+  if (userLoading || loading) { // Combine both loading states
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="w-12 h-12 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  if (!user) { // Check if user is logged in
+    return (
+      <div className="p-6">
+        <Alert variant="destructive">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>נדרשת התחברות</AlertTitle>
+          <AlertDescription>
+            עליך להתחבר כדי לגשת למערכת התיאומים.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6 bg-gradient-to-br from-blue-50 to-green-50 min-h-screen">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-green-500 rounded-xl flex items-center justify-center">
+          <Wand2 className="w-5 h-5 text-white" />
+        </div>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">תיאום טכנאי</h1>
+          <p className="text-gray-600 mt-1">מצא את התיאום האופטימלי או בצע תיאום ידני</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Input Form Card */}
+        <Card className="lg:col-span-1 bg-white/80 backdrop-blur border-blue-200 shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserCheck className="w-5 h-5 text-blue-600" />
+              פרטי התיאום
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isAdmin && ( // Conditional rendering based on isAdmin
+              <div className="flex items-center space-x-2 bg-red-50 p-3 rounded-lg border border-red-200">
+                <Checkbox 
+                  id="managerApproval" 
+                  checked={managerApproval} 
+                  onCheckedChange={(checked) => {
+                      setManagerApproval(checked);
+                      if(checked) setShowManagerApprovalAlert(false); // הסתרת התראה אם המנהל אישר
+                  }}
+                />
+                <Label htmlFor="managerApproval" className="font-bold text-red-600 text-sm">
+                  אישור מנהל (עוקף המלצות)
+                </Label>
+              </div>
+            )}
+            
+            {managerApproval ? (
+                <ManualScheduler 
+                    contractors={contractors} 
+                    settlements={settlements} 
+                    taskTypes={taskTypes}
+                    onAppointmentCreated={redirectToCalendar}
+                />
+            ) : (
+              <>
+                <div>
+                  <Label htmlFor="settlement">יישוב</Label>
+                  <Select value={selectedSettlement} onValueChange={setSelectedSettlement}>
+                    <SelectTrigger id="settlement">
+                      <SelectValue placeholder="בחר יישוב" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {settlements.filter(s => s.id && s.name).map(s => (
+                        <SelectItem key={s.id} value={s.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{s.name}</span>
+                            <span className="text-xs text-gray-500">({s.region})</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="taskType">סוג פק"ע</Label>
+                  <Select value={selectedTaskType} onValueChange={setSelectedTaskType}>
+                    <SelectTrigger id="taskType">
+                      <SelectValue placeholder="בחר סוג פק&quot;ע" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {taskTypes.filter(t => t.id && t.type_name).map(t => (
+                        <SelectItem key={t.id} value={t.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{t.type_name}</span>
+                            <span className="text-xs text-gray-500">({t.duration_minutes} דק׳)</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="taskNumber">מספר פק"ע (אופציונלי)</Label>
+                  <Input 
+                    id="taskNumber" 
+                    value={taskNumber} 
+                    onChange={(e) => setTaskNumber(e.target.value)} 
+                    placeholder="לדוגמה: 123456" 
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="selectedDate">תאריך ספציפי (אופציונלי)</Label>
+                  <Input 
+                    id="selectedDate"
+                    type="date"
+                    value={selectedDate} 
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    min={getMinDate()}
+                    className="bg-white"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {selectedDate ? 'חיפוש לתאריך ספציפי' : 'חיפוש כללי לשבועיים הקרובים'}
+                  </p>
+                </div>
+                <Button onClick={handleSearchSlots} disabled={isSearching} className="w-full bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700">
+                  {isSearching ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      מחפש...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      מצא תיאום אופטימלי
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Results Card */}
+        <Card className={`lg:col-span-2 bg-white/80 backdrop-blur border-green-200 shadow-lg min-h-[400px] ${managerApproval ? 'hidden lg:block' : ''}`}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarIcon className="w-5 h-5 text-green-600" />
+              מועדים מומלצים
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {renderResults()}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
