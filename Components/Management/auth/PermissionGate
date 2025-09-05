@@ -1,0 +1,88 @@
+import React, { useState, useEffect } from 'react';
+import { User } from '@/entities/User';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ShieldAlert, Loader2 } from 'lucide-react';
+
+export function PermissionGate({ 
+  children, 
+  requiredRole = null, 
+  fallback = null, 
+  showAlert = true 
+}) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkUser = async () => {
+      try {
+        const currentUser = await User.me();
+        setUser(currentUser);
+      } catch (error) {
+        console.log("No authenticated user");
+      }
+      setLoading(false);
+    };
+    checkUser();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return fallback || (showAlert && (
+      <Alert variant="destructive" className="m-4">
+        <ShieldAlert className="h-4 w-4" />
+        <AlertTitle>נדרשת התחברות</AlertTitle>
+        <AlertDescription>
+          עליך להתחבר כדי לגשת לתוכן זה.
+        </AlertDescription>
+      </Alert>
+    ));
+  }
+
+  if (requiredRole && user.role !== requiredRole) {
+    return fallback || (showAlert && (
+      <Alert variant="destructive" className="m-4">
+        <ShieldAlert className="h-4 w-4" />
+        <AlertTitle>אין הרשאה מתאימה</AlertTitle>
+        <AlertDescription>
+          תוכן זה זמין רק למשתמשים עם תפקיד "{requiredRole}".
+        </AlertDescription>
+      </Alert>
+    ));
+  }
+
+  return children;
+}
+
+export function usePermissions() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkUser = async () => {
+      try {
+        const currentUser = await User.me();
+        setUser(currentUser);
+      } catch (error) {
+        console.log("No authenticated user");
+      }
+      setLoading(false);
+    };
+    checkUser();
+  }, []);
+
+  return {
+    user,
+    loading,
+    isAdmin: user?.role === 'admin',
+    isUser: user?.role === 'user',
+    hasRole: (role) => user?.role === role,
+    canAccess: (requiredRole) => !requiredRole || user?.role === requiredRole,
+  };
+}

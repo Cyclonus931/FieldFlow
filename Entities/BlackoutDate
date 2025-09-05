@@ -1,0 +1,19 @@
+{
+  "name": "BlackoutDate",
+  "type": "object",
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "התאריך שאינו יום עבודה"
+    },
+    "description": {
+      "type": "string",
+      "description": "תיאור (למשל, 'פסח', 'יום העצמאות')"
+    }
+  },
+  "required": [
+    "date",
+    "description"
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "name": "Settlement",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "שם היישוב בעברית"
+    },
+    "region": {
+      "type": "string",
+      "description": "אזור"
+    },
+    "sub_region": {
+      "type": "string",
+      "description": "תת-אזור"
+    },
+    "address": {
+      "type": "string",
+      "description": "כתובת"
+    },
+    "latitude": {
+      "type": "number",
+      "description": "קו רוחב"
+    },
+    "longitude": {
+      "type": "number",
+      "description": "קו אורך"
+    },
+    "arrival_days": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "ימי הגעה"
+    },
+    "contractor_1": {
+      "type": "string",
+      "description": "קבלן ראשי"
+    },
+    "contractor_2": {
+      "type": "string",
+      "description": "קבלן משני"
+    },
+    "time_slots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "סלוטים זמינים"
+    },
+    "contact_person": {
+      "type": "string",
+      "description": "איש קשר ביישוב"
+    },
+    "contact_person_phone": {
+      "type": "string",
+      "description": "טלפון איש קשר"
+    },
+    "operating_hours": {
+      "type": "string",
+      "description": "שעות פעילות בפורמט 00:00-00:00"
+    },
+    "notes": {
+      "type": "string",
+      "description": "הערות כלליות על היישוב"
+    }
+  },
+  "required": [
+    "name",
+    "region"
+  ]
+}

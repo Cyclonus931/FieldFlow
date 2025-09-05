@@ -1,0 +1,17 @@
+{
+  "name": "SystemConfig",
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string",
+      "description": "מפתח ההגדרה (למשל, google_maps_api_key)"
+    },
+    "value": {
+      "type": "string",
+      "description": "ערך ההגדרה"
+    }
+  },
+  "required": [
+    "key"
+  ]
+}

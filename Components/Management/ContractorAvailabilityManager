@@ -1,0 +1,705 @@
+
+import React, { useState, useEffect } from 'react';
+import { Contractor } from '@/entities/Contractor';
+import { ContractorAvailability } from '@/entities/ContractorAvailability';
+import { Settlement } from '@/entities/Settlement';
+import { Appointment } from '@/entities/Appointment'; // Added for dependency check
+import { UploadFile, ExtractDataFromUploadedFile } from '@/integrations/Core';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import {
+  PlusCircle,
+  Edit,
+  Trash2,
+  Loader2,
+  Clock,
+  MapPin,
+  Upload,
+  FileSpreadsheet,
+  CheckCircle,
+  AlertTriangle,
+} from 'lucide-react';
+
+const daysOfWeek = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
+const dayMapping = {
+  'א': 'א',
+  'ב': 'ב',
+  'ג': 'ג',
+  'ד': 'ד',
+  'ה': 'ה',
+  'ו': 'ו',
+  'ש': 'ש'
+};
+
+// פונקציה לעיצוב הזמן הנותר
+const formatTime = (ms) => {
+  if (ms < 0) ms = 0;
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) {
+    return `כ-${minutes} דקות ו-${seconds} שניות`;
+  }
+  return `כ-${seconds} שניות`;
+};
+
+export default function ContractorAvailabilityManager() {
+  const [availabilities, setAvailabilities] = useState([]);
+  const [contractors, setContractors] = useState([]);
+  const [settlements, setSettlements] = useState([]);
+  const [appointments, setAppointments] = useState([]); // Added for dependency check
+  const [loading, setLoading] = useState(true);
+  const [editingAvailability, setEditingAvailability] = useState(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState({ message: null, type: null, working: false, progress: 0, total: 0, remainingTime: null });
+  const [selectedItems, setSelectedItems] = useState([]);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [availabilityData, contractorData, settlementData, appointmentData] = await Promise.all([
+        ContractorAvailability.list('-created_date'),
+        Contractor.list(),
+        Settlement.list(),
+        Appointment.list() // Fetch appointments
+      ]);
+      setAvailabilities(availabilityData);
+      setContractors(contractorData);
+      setSettlements(settlementData);
+      setAppointments(appointmentData); // Set appointments state
+      setSelectedItems([]);
+    } catch (error) {
+      console.error('שגיאה בטעינת נתונים:', error);
+    }
+    setLoading(false);
+  };
+
+  // Helper function to check for dependencies
+  const checkAvailabilityDependencies = (availability) => {
+    const dependencies = [];
+
+    // בדיקת תיאומים לזמינות ספציפית זו
+    const relatedAppointments = appointments.filter(app =>
+      app.contractor_id === availability.contractor_id &&
+      app.settlement_name === availability.settlement_name
+    );
+
+    if (relatedAppointments.length > 0) {
+      dependencies.push(`${relatedAppointments.length} תיאומים`);
+    }
+
+    return dependencies;
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setUploadStatus({
+        message: 'נא להעלות קובץ CSV בלבד',
+        type: 'error',
+        working: false,
+        progress: 0,
+        total: 0,
+        remainingTime: null
+      });
+      event.target.value = '';
+      return;
+    }
+
+    setUploadStatus({ message: 'מעלה קובץ זמינות...', type: 'info', working: true, progress: 0, total: 0, remainingTime: null });
+
+    try {
+      const { file_url } = await UploadFile({ file });
+      setUploadStatus(prev => ({ ...prev, message: 'מעבד נתונים מהקובץ...', progress: 0, total: 0, remainingTime: null }));
+
+      const extractionResult = await ExtractDataFromUploadedFile({
+        file_url,
+        json_schema: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              "שם קבלן": { "type": "string" },
+              "שם יישוב": { "type": "string" },
+              "א": { "type": "string" },
+              "ב": { "type": "string" },
+              "ג": { "type": "string" },
+              "ד": { "type": "string" },
+              "ה": { "type": "string" },
+              "ו": { "type": "string" },
+              "ש": { "type": "string" }
+            },
+            required: ["שם קבלן", "שם יישוב"]
+          }
+        }
+      });
+
+      if (extractionResult.status === "success" && extractionResult.output) {
+        const availabilityData = Array.isArray(extractionResult.output) ? extractionResult.output : [extractionResult.output];
+        let addedCount = 0;
+        const total = availabilityData.length;
+        const startTime = Date.now();
+        const skippedItems = [];
+        let processedCount = 0;
+
+        setUploadStatus(prev => ({ ...prev, total }));
+
+        for (let i = 0; i < availabilityData.length; i++) {
+          const item = availabilityData[i];
+          processedCount = i + 1;
+          const elapsed = Date.now() - startTime;
+          const estimatedTotalTime = (elapsed / processedCount) * total;
+          const remainingTime = estimatedTotalTime - elapsed;
+          const progress = (processedCount / total) * 100;
+
+          setUploadStatus(prev => ({
+            ...prev,
+            message: `מעבד ${processedCount}/${total}: ${item["שם קבלן"] || ''} ב-${item["שם יישוב"] || ''}`,
+            progress: progress,
+            remainingTime: formatTime(remainingTime)
+          }));
+
+          const contractorName = item["שם קבלן"];
+          const settlementName = item["שם יישוב"];
+
+          // דילוג על שורות ריקות
+          if (!contractorName || !settlementName) {
+            skippedItems.push({
+              line: i + 1,
+              contractorName: contractorName || 'חסר',
+              settlementName: settlementName || 'חסר',
+              reason: 'שם קבלן או שם יישוב חסרים'
+            });
+            continue;
+          }
+
+          // בדיקת שם הקבלן
+          const foundContractor = contractors.find(c => c.name === contractorName);
+          if (!foundContractor) {
+            skippedItems.push({
+              line: i + 1,
+              contractorName,
+              settlementName,
+              reason: `שם קבלן '${contractorName}' לא נמצא במערכת`
+            });
+            continue;
+          }
+
+          // בדיקת שם היישוב
+          const foundSettlement = settlements.find(s => s.name === settlementName);
+          if (!foundSettlement) {
+            skippedItems.push({
+              line: i + 1,
+              contractorName,
+              settlementName,
+              reason: `שם יישוב '${settlementName}' לא נמצא במערכת`
+            });
+            continue;
+          }
+
+          const contractorId = foundContractor.contractor_id;
+
+          // עבור כל יום שיש בו שעות, צור רשומת זמינות
+          const days = [];
+          const timeRanges = [];
+
+          daysOfWeek.forEach(day => {
+            const timeRange = item[day];
+            if (timeRange && timeRange.trim() !== '') {
+              days.push(day);
+              timeRanges.push(timeRange.trim());
+            }
+          });
+
+          if (days.length > 0) {
+            try {
+              await ContractorAvailability.create({
+                contractor_id: contractorId,
+                settlement_name: settlementName,
+                days_of_week: days,
+                time_range: timeRanges.join(' | '),
+                task_types: [],
+                notes: `נטען מקובץ CSV`
+              });
+              addedCount++;
+            } catch (createError) {
+              skippedItems.push({
+                line: i + 1,
+                contractorName,
+                settlementName,
+                reason: `שגיאה ביצירת הזמינות: ${createError.message}`
+              });
+            }
+          } else {
+            skippedItems.push({
+              line: i + 1,
+              contractorName,
+              settlementName,
+              reason: 'לא הוגדרו ימים עם שעות עבודה'
+            });
+          }
+        }
+
+        // הכנת דוח התוצאות
+        let resultMessage = `הטעינה הושלמה. נוספו ${addedCount} רשומות זמינות מתוך ${total} שורות.`;
+        
+        if (skippedItems.length > 0) {
+          resultMessage += `\n\nשורות שלא נטענו (${skippedItems.length}):\n`;
+          skippedItems.forEach(item => {
+            resultMessage += `שורה ${item.line}: ${item.contractorName} ב-${item.settlementName} - ${item.reason}\n`;
+          });
+        }
+
+        const resultType = skippedItems.length > 0 ? 'warning' : 'success';
+
+        setUploadStatus({
+          message: resultMessage,
+          type: resultType,
+          working: false,
+          progress: 100,
+          remainingTime: null
+        });
+        await loadData();
+
+      } else {
+        throw new Error(extractionResult.details || 'שגיאה בעיבוד הקובץ');
+      }
+    } catch (err) {
+      setUploadStatus({ message: `שגיאה בהעלאת הקובץ: ${err.message}`, type: 'error', working: false, progress: 0, total: 0, remainingTime: null });
+    }
+    event.target.value = '';
+  };
+
+  const handleSave = async (formData) => {
+    setIsProcessing(true);
+    try {
+      if (editingAvailability && editingAvailability.id) {
+        await ContractorAvailability.update(editingAvailability.id, formData);
+      } else {
+        await ContractorAvailability.create(formData);
+      }
+      setIsDialogOpen(false);
+      setEditingAvailability(null);
+      await loadData();
+    } catch (error) {
+      console.error('שגיאה בשמירה:', error);
+    }
+    setIsProcessing(false);
+  };
+
+  const handleDelete = async (availabilityId) => {
+    const availability = availabilities.find(a => a.id === availabilityId);
+    if (!availability) return;
+
+    const dependencies = checkAvailabilityDependencies(availability);
+
+    if (dependencies.length > 0) {
+      alert(`לא ניתן למחוק את הזמינות של קבלן "${getContractorName(availability.contractor_id)}" ביישוב "${availability.settlement_name}" מכיוון שהיא משויכת ל: ${dependencies.join(', ')}`);
+      return;
+    }
+
+    if (window.confirm('האם אתה בטוח שברצונך למחוק את הזמינות הספציפית?')) {
+      try {
+        await ContractorAvailability.delete(availabilityId);
+        await loadData();
+      } catch (error) {
+        console.error('שגיאה במחיקת זמינות:', error);
+        alert('שגיאה במחיקת הזמינות. נא לנסות שוב.');
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedItems.length === 0) return;
+
+    // בדיקת תלויות עבור כל הפריטים הנבחרים
+    const dependencyErrors = [];
+
+    selectedItems.forEach(id => {
+      const availability = availabilities.find(a => a.id === id);
+      if (availability) {
+        const dependencies = checkAvailabilityDependencies(availability);
+        if (dependencies.length > 0) {
+          dependencyErrors.push(`${getContractorName(availability.contractor_id)} ב-${availability.settlement_name}: ${dependencies.join(', ')}`);
+        }
+      }
+    });
+
+    if (dependencyErrors.length > 0) {
+      alert(`לא ניתן למחוק את הזמינויות הבאות מכיוון שהן משויכות ליישויות אחרות:\n\n${dependencyErrors.join('\n')}`);
+      return;
+    }
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק ${selectedItems.length} זמינויות נבחרות?`)) {
+      setIsProcessing(true);
+      await Promise.all(selectedItems.map(id => ContractorAvailability.delete(id).catch(err => console.error(`Failed to delete availability ${id}:`, err))));
+      setSelectedItems([]);
+      await loadData();
+      setIsProcessing(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedItems.length === availabilities.length && availabilities.length > 0) {
+      setSelectedItems([]);
+    } else {
+      setSelectedItems(availabilities.map(a => a.id));
+    }
+  };
+
+  const toggleSelectItem = (id) => {
+    setSelectedItems(prev =>
+      prev.includes(id)
+        ? prev.filter(item => item !== id)
+        : [...prev, id]
+    );
+  };
+
+  const openForm = (availability = null) => {
+    setEditingAvailability(availability);
+    setIsDialogOpen(true);
+  };
+
+  const getContractorName = (contractorId) => {
+    const contractor = contractors.find(c => c.contractor_id === contractorId);
+    return contractor ? contractor.name : contractorId;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">זמינות ספציפית ליישובים</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            הגדר שעות וימים ספציפיים לקבלנים ביישובים מסוימים
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {selectedItems.length > 0 && (
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isProcessing} className="flex items-center gap-2">
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>} מחק נבחרות ({selectedItems.length})
+            </Button>
+          )}
+          <Input
+            type="file"
+            id="upload-availability"
+            className="hidden"
+            onChange={handleFileUpload}
+            disabled={uploadStatus.working}
+            accept=".csv"
+          />
+          <Button asChild variant="outline" disabled={uploadStatus.working}>
+            <label htmlFor="upload-availability" className="cursor-pointer flex items-center gap-2">
+              {uploadStatus.working ? (
+                <Loader2 className="w-4 h-4 animate-spin"/>
+              ) : (
+                <Upload className="w-4 h-4"/>
+              )}
+              טען קובץ זמינות
+            </label>
+          </Button>
+          <Button onClick={() => openForm()} className="flex items-center gap-2">
+            <PlusCircle className="w-4 h-4"/> הוסף זמינות ידנית
+          </Button>
+        </div>
+      </div>
+
+      {/* הוראות לפורמט הקובץ */}
+      <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+        <h3 className="font-semibold text-orange-800 mb-2">פורמט קובץ זמינות</h3>
+        <div className="text-sm text-orange-700 space-y-1">
+          <p>• הקובץ חייב להיות בפורמט CSV</p>
+          <p>• עמודות נדרשות: <strong>שם קבלן</strong>, <strong>שם יישוב</strong>, א, ב, ג, ד, ה, ו, ש (ימי השבוע)</p>
+          <p>• שם הקבלן חייב להיות זהה לשם הקיים במערכת</p>
+          <p>• שם היישוב חייב להיות זהה לשם הקיים במערכת</p>
+          <p>• בכל תא של יום הכנס טווח שעות (לדוגמה: 08:00-12:00)</p>
+          <p>• השאר ריק תאים של ימים ללא זמינות</p>
+        </div>
+      </div>
+
+      {uploadStatus.message && (
+        <Alert variant={uploadStatus.type === 'error' ? 'destructive' : 'default'} className={
+          uploadStatus.type === 'success' 
+            ? 'bg-green-50 border-green-200 text-green-800' 
+            : uploadStatus.type === 'warning'
+            ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
+            : uploadStatus.type === 'info' 
+            ? 'bg-blue-50 border-blue-200' 
+            : ''
+        }>
+          {uploadStatus.type === 'error' && <AlertTriangle className="h-4 w-4" />}
+          {uploadStatus.type === 'success' && <CheckCircle className="h-4 w-4" />}
+          {uploadStatus.type === 'warning' && <AlertTriangle className="h-4 w-4" />}
+          {uploadStatus.working && <Loader2 className="h-4 w-4 animate-spin" />}
+          <div className="w-full">
+            <AlertDescription className="mr-2 whitespace-pre-line">{uploadStatus.message}</AlertDescription>
+            {uploadStatus.working && uploadStatus.total > 0 && (
+              <div className="mt-2">
+                <Progress value={uploadStatus.progress} className="w-full" />
+                <div className="flex justify-between text-xs mt-1">
+                  <span>{Math.round(uploadStatus.progress)}%</span>
+                  {uploadStatus.remainingTime && <span>זמן לסיום: {uploadStatus.remainingTime}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        </Alert>
+      )}
+
+      {loading ? (
+        <div className="text-center p-8">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto"/>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={selectedItems.length === availabilities.length && availabilities.length > 0}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={availabilities.length === 0}
+                />
+              </TableHead>
+              <TableHead>קבלן</TableHead>
+              <TableHead>יישוב</TableHead>
+              <TableHead>ימים</TableHead>
+              <TableHead>שעות</TableHead>
+              <TableHead>הערות</TableHead>
+              <TableHead>פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {availabilities.map(availability => (
+              <TableRow key={availability.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedItems.includes(availability.id)}
+                    onCheckedChange={() => toggleSelectItem(availability.id)}
+                  />
+                </TableCell>
+                <TableCell className="font-medium">
+                  {/* The "דורש עדכון" badge is no longer necessary here since contractor_id is directly assigned on upload */}
+                  {getContractorName(availability.contractor_id)}
+                </TableCell>
+                <TableCell>{availability.settlement_name}</TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {availability.days_of_week?.map((day, i) => (
+                      <Badge key={i} variant="outline" className="text-xs">
+                        {day}
+                      </Badge>
+                    ))}
+                  </div>
+                </TableCell>
+                <TableCell className="max-w-40 truncate">{availability.time_range}</TableCell>
+                <TableCell className="max-w-32 truncate">{availability.notes}</TableCell>
+                <TableCell className="flex gap-2">
+                  <Button variant="ghost" size="icon" onClick={() => openForm(availability)}>
+                    <Edit className="w-4 h-4"/>
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(availability.id)}>
+                    <Trash2 className="w-4 h-4 text-red-500"/>
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editingAvailability ? 'עריכת זמינות ספציפית' : 'הוספת זמינות ספציפית'}
+            </DialogTitle>
+          </DialogHeader>
+          <AvailabilityForm
+            availability={editingAvailability}
+            onSave={handleSave}
+            onCancel={() => { setIsDialogOpen(false); setEditingAvailability(null); }}
+            contractors={contractors}
+            settlements={settlements}
+            isProcessing={isProcessing}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function AvailabilityForm({ availability, onSave, onCancel, contractors, settlements, isProcessing }) {
+  const [formData, setFormData] = useState(
+    availability || {
+      contractor_id: '',
+      settlement_name: '',
+      days_of_week: [],
+      time_range: '08:00-18:00',
+      task_types: [],
+      notes: ''
+    }
+  );
+
+  const handleArrayChange = (field, value, checked) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: checked
+        ? [...(prev[field] || []), value]
+        : (prev[field] || []).filter(item => item !== value)
+    }));
+  };
+
+  const selectedContractor = contractors.find(c => c.contractor_id === formData.contractor_id);
+
+  return (
+    <>
+      <div className="grid gap-4 py-4">
+        <div className="space-y-2">
+          <Label>בחר קבלן</Label>
+          <Select
+            value={formData.contractor_id}
+            onValueChange={(value) => setFormData(prev => ({...prev, contractor_id: value}))}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="בחר קבלן" />
+            </SelectTrigger>
+            <SelectContent>
+              {contractors.map(contractor => (
+                <SelectItem key={contractor.id} value={contractor.contractor_id}>
+                  {contractor.name} ({contractor.contractor_id})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label>בחר יישוב</Label>
+          <Select
+            value={formData.settlement_name}
+            onValueChange={(value) => setFormData(prev => ({...prev, settlement_name: value}))}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="בחר יישוב" />
+            </SelectTrigger>
+            <SelectContent>
+              {settlements.map(settlement => (
+                <SelectItem key={settlement.id} value={settlement.name}>
+                  <div className="flex items-center gap-2">
+                    <span>{settlement.name}</span>
+                    <Badge variant="outline" className="text-xs">
+                      {settlement.region}
+                    </Badge>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label>ימי עבודה</Label>
+          <div className="flex flex-wrap gap-2">
+            {daysOfWeek.map(day => (
+              <div key={day} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`day-${day}`}
+                  checked={formData.days_of_week?.includes(day) || false}
+                  onCheckedChange={(checked) => handleArrayChange('days_of_week', day, checked)}
+                />
+                <Label htmlFor={`day-${day}`} className="text-sm font-medium">
+                  {day}
+                </Label>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="time_range">טווח שעות</Label>
+          <Input
+            id="time_range"
+            name="time_range"
+            value={formData.time_range}
+            onChange={(e) => setFormData(prev => ({...prev, time_range: e.target.value}))}
+            placeholder="10:00-14:00"
+          />
+        </div>
+
+        {/* סוגי משימות מותרים ביישוב זה */}
+        {selectedContractor && selectedContractor.task_types && (
+          <div className="space-y-2">
+            <Label>סוגי פק״עות מותרים ביישוב זה</Label>
+            <div className="grid grid-cols-1 gap-2 max-h-24 overflow-y-auto">
+              {selectedContractor.task_types.map(taskType => (
+                <div key={taskType} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`task-specific-${taskType}`}
+                    checked={formData.task_types?.includes(taskType) || false}
+                    onCheckedChange={(checked) => handleArrayChange('task_types', taskType, checked)}
+                  />
+                  <Label htmlFor={`task-specific-${taskType}`} className="text-sm">
+                    {taskType}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <Label htmlFor="notes">הערות</Label>
+          <Input
+            id="notes"
+            name="notes"
+            value={formData.notes}
+            onChange={(e) => setFormData(prev => ({...prev, notes: e.target.value}))}
+            placeholder="הערות נוספות..."
+          />
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>ביטול</Button>
+        <Button onClick={() => onSave(formData)} disabled={isProcessing}>
+          {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : 'שמור'}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}

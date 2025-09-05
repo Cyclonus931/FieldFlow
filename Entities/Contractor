@@ -1,0 +1,77 @@
+{
+  "name": "Contractor",
+  "type": "object",
+  "properties": {
+    "contractor_id": {
+      "type": "string",
+      "description": "מזהה ייחודי"
+    },
+    "name": {
+      "type": "string",
+      "description": "שם הקבלן"
+    },
+    "phone": {
+      "type": "string",
+      "description": "מספר טלפון"
+    },
+    "email": {
+      "type": "string",
+      "description": "כתובת אימייל"
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "אזורים שהקבלן משרת"
+    },
+    "sub_regions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "תת-אזורים שהקבלן משרת"
+    },
+    "priority_settlements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "יישובים ספציפיים עם עדיפות גבוהה"
+    },
+    "task_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "סוגי פק״עות שהקבלן יכול לבצע"
+    },
+    "default_hours": {
+      "type": "string",
+      "default": "08:00-18:00",
+      "description": "שעות עבודה בריריית מחדל"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "נמוך",
+        "רגיל",
+        "גבוה"
+      ],
+      "default": "רגיל",
+      "description": "רמת עדיפות"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true,
+      "description": "האם הקבלן פעיל"
+    }
+  },
+  "required": [
+    "contractor_id",
+    "name",
+    "phone",
+    "regions",
+    "task_types"
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "ContractorAvailability",
+  "type": "object",
+  "properties": {
+    "contractor_id": {
+      "type": "string",
+      "description": "מזהה הקבלן"
+    },
+    "settlement_name": {
+      "type": "string",
+      "description": "שם היישוב הספציפי"
+    },
+    "days_of_week": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "ימי השבוע (א, ב, ג, ד, ה, ו, ש)"
+    },
+    "time_range": {
+      "type": "string",
+      "description": "טווח שעות (לדוגמה: 10:00-14:00)"
+    },
+    "task_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "סוגי משימות מותרים ביישוב זה"
+    },
+    "notes": {
+      "type": "string",
+      "description": "הערות נוספות"
+    }
+  },
+  "required": [
+    "contractor_id",
+    "settlement_name",
+    "days_of_week",
+    "time_range"
+  ]
+}

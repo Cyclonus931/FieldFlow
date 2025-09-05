@@ -1,0 +1,88 @@
+import React, { useState, useEffect } from 'react';
+import { SystemConfig } from '@/entities/SystemConfig';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { KeyRound, Save, Loader2 } from 'lucide-react';
+
+const API_KEY_NAME = "google_maps_api_key";
+
+export default function ApiKeyManager() {
+  const [apiKey, setApiKey] = useState('');
+  const [configId, setConfigId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadApiKey();
+  }, []);
+
+  const loadApiKey = async () => {
+    setLoading(true);
+    const configs = await SystemConfig.filter({ key: API_KEY_NAME });
+    if (configs.length > 0) {
+      setApiKey(configs[0].value);
+      setConfigId(configs[0].id);
+    }
+    setLoading(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    if (configId) {
+      await SystemConfig.update(configId, { value: apiKey });
+    } else {
+      await SystemConfig.create({ key: API_KEY_NAME, value: apiKey });
+      await loadApiKey(); // to get the new configId
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Card className="bg-white/80 backdrop-blur border-blue-200">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <KeyRound className="w-5 h-5 text-blue-600" />
+          ניהול מפתח API
+        </CardTitle>
+        <CardDescription>
+          הזן כאן את מפתח ה-API של Google Maps. המפתח יישמר לשימוש עתידי במערכת.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center justify-center h-24">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="api-key">Google Maps API Key</Label>
+              <Input
+                id="api-key"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="הזן את מפתח ה-API"
+              />
+            </div>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  שומר...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  שמור מפתח
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

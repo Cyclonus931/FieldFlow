@@ -1,0 +1,628 @@
+
+import React, { useState, useEffect } from 'react';
+import { Contractor } from '@/entities/Contractor';
+import { ContractorAvailability } from '@/entities/ContractorAvailability';
+import { Settlement } from '@/entities/Settlement';
+import { TaskType } from '@/entities/TaskType';
+import { Appointment } from '@/entities/Appointment';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import {
+  PlusCircle,
+  Edit,
+  Trash2,
+  Loader2,
+  Users,
+  Phone,
+  Mail,
+  Clock,
+  MapPin,
+} from 'lucide-react';
+
+export default function ContractorManager() {
+  const [contractors, setContractors] = useState([]);
+  const [settlements, setSettlements] = useState([]);
+  const [taskTypes, setTaskTypes] = useState([]);
+  const [contractorAvailabilities, setContractorAvailabilities] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingContractor, setEditingContractor] = useState(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedItems, setSelectedItems] = useState([]);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [contractorData, settlementData, taskTypeData, availabilityData, appointmentData] = await Promise.all([
+        Contractor.list('-created_date'),
+        Settlement.list(),
+        TaskType.list(),
+        ContractorAvailability.list(),
+        Appointment.list()
+      ]);
+      setContractors(contractorData);
+      setSettlements(settlementData);
+      setTaskTypes(taskTypeData);
+      setContractorAvailabilities(availabilityData);
+      setAppointments(appointmentData);
+      setSelectedItems([]);
+    } catch (error) {
+      console.error('שגיאה בטעינת נתונים:', error);
+    }
+    setLoading(false);
+  };
+
+  const checkContractorDependencies = (contractorIdString) => {
+    const dependencies = [];
+
+    // בדיקת זמינויות ספציפיות
+    const availabilities = contractorAvailabilities.filter(av => av.contractor_id === contractorIdString);
+    if (availabilities.length > 0) {
+      dependencies.push(`${availabilities.length} זמינויות ספציפיות`);
+    }
+
+    // בדיקת תיאומים
+    const contractorAppointments = appointments.filter(app => app.contractor_id === contractorIdString);
+    if (contractorAppointments.length > 0) {
+      dependencies.push(`${contractorAppointments.length} תיאומים`);
+    }
+
+    return dependencies;
+  };
+
+  const handleSave = async (formData) => {
+    setIsProcessing(true);
+    try {
+      if (editingContractor && editingContractor.id) {
+        await Contractor.update(editingContractor.id, formData);
+      } else {
+        await Contractor.create(formData);
+      }
+      setIsDialogOpen(false);
+      setEditingContractor(null);
+      await loadData();
+    } catch (error) {
+      console.error('שגיאה בשמירה:', error);
+    }
+    setIsProcessing(false);
+  };
+
+  const handleDelete = async (contractorId) => {
+    const contractorToDelete = contractors.find(c => c.id === contractorId);
+    if (!contractorToDelete) {
+      console.error('Contractor not found for deletion.');
+      return;
+    }
+
+    const dependencies = checkContractorDependencies(contractorToDelete.contractor_id);
+
+    if (dependencies.length > 0) {
+      alert(`לא ניתן למחוק את הקבלן "${contractorToDelete.name}" מכיוון שהוא משויך ל: ${dependencies.join(', ')}`);
+      return;
+    }
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק את הקבלן "${contractorToDelete.name}"?`)) {
+      try {
+        await Contractor.delete(contractorId);
+        await loadData();
+      } catch (error) {
+        console.error('שגיאה במחיקת קבלן:', error);
+        alert('שגיאה במחיקת הקבלן. נא לנסות שוב.');
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedItems.length === 0) return;
+
+    // בדיקת תלויות עבור כל הפריטים הנבחרים
+    const dependencyErrors = [];
+
+    for (const selectedId of selectedItems) {
+      const contractor = contractors.find(c => c.id === selectedId);
+      if (contractor) {
+        const dependencies = checkContractorDependencies(contractor.contractor_id);
+        if (dependencies.length > 0) {
+          dependencyErrors.push(`${contractor.name}: ${dependencies.join(', ')}`);
+        }
+      }
+    }
+
+    if (dependencyErrors.length > 0) {
+      alert(`לא ניתן למחוק את הקבלנים הבאים מכיוון שהם משויכים ליישויות אחרות:\n\n${dependencyErrors.join('\n')}`);
+      return;
+    }
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק ${selectedItems.length} קבלנים נבחרים?`)) {
+      setIsProcessing(true);
+      // Use Promise.all to delete items concurrently,
+      // and .catch() on each promise to prevent Promise.all from failing entirely if one deletion fails.
+      await Promise.all(selectedItems.map(id => Contractor.delete(id).catch(err => console.error(`Failed to delete contractor ${id}:`, err))));
+      setSelectedItems([]);
+      await loadData();
+      setIsProcessing(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedItems.length === contractors.length && contractors.length > 0) {
+      setSelectedItems([]);
+    } else {
+      setSelectedItems(contractors.map(c => c.id));
+    }
+  };
+
+  const toggleSelectItem = (id) => {
+    setSelectedItems(prev =>
+      prev.includes(id)
+        ? prev.filter(item => item !== id)
+        : [...prev, id]
+    );
+  };
+
+  const openForm = (contractor = null) => {
+    setEditingContractor(contractor);
+    setIsDialogOpen(true);
+  };
+
+  const regions = [...new Set(settlements.map(s => s.region))].filter(Boolean);
+  const subRegions = [...new Set(settlements.map(s => s.sub_region))].filter(Boolean);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">ניהול קבלנים</h2>
+        <div className="flex gap-2">
+          {selectedItems.length > 0 && (
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              className="flex items-center gap-2"
+              disabled={isProcessing}
+            >
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>}
+              מחק נבחרים ({selectedItems.length})
+            </Button>
+          )}
+          <Button onClick={() => openForm()} className="flex items-center gap-2">
+            <PlusCircle className="w-4 h-4"/> הוסף קבלן
+          </Button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center p-8">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto"/>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={selectedItems.length === contractors.length && contractors.length > 0}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={contractors.length === 0}
+                />
+              </TableHead>
+              <TableHead>מזהה</TableHead>
+              <TableHead>שם קבלן</TableHead>
+              <TableHead>טלפון</TableHead>
+              <TableHead>אזורים</TableHead>
+              <TableHead>יישובי עדיפות</TableHead>
+              <TableHead>סוגי משימות</TableHead>
+              <TableHead>שעות ברירת מחדל</TableHead>
+              <TableHead>פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {contractors.map(contractor => (
+              <TableRow key={contractor.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedItems.includes(contractor.id)}
+                    onCheckedChange={() => toggleSelectItem(contractor.id)}
+                  />
+                </TableCell>
+                <TableCell className="font-mono text-sm">{contractor.contractor_id}</TableCell>
+                <TableCell className="font-medium">{contractor.name}</TableCell>
+                <TableCell>{contractor.phone}</TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {contractor.regions?.map((region, i) => (
+                      <Badge key={i} variant="outline" className="text-xs">
+                        {region}
+                      </Badge>
+                    ))}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {contractor.priority_settlements?.slice(0, 2)?.map((settlement, i) => (
+                      <Badge key={i} variant="default" className="text-xs bg-orange-100 text-orange-700 border-orange-200">
+                        ⭐ {settlement}
+                      </Badge>
+                    ))}
+                    {contractor.priority_settlements?.length > 2 && (
+                      <Badge variant="default" className="text-xs bg-orange-100 text-orange-700 border-orange-200">
+                        +{contractor.priority_settlements.length - 2}
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {contractor.task_types?.slice(0, 2)?.map((task, i) => (
+                      <Badge key={i} variant="secondary" className="text-xs">
+                        {task}
+                      </Badge>
+                    ))}
+                    {contractor.task_types?.length > 2 && (
+                      <Badge variant="secondary" className="text-xs">
+                        +{contractor.task_types.length - 2}
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>{contractor.default_hours}</TableCell>
+                <TableCell className="flex gap-2">
+                  <Button variant="ghost" size="icon" onClick={() => openForm(contractor)}>
+                    <Edit className="w-4 h-4"/>
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(contractor.id)}>
+                    <Trash2 className="w-4 h-4 text-red-500"/>
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingContractor ? 'עריכת קבלן' : 'הוספת קבלן חדש'}</DialogTitle>
+          </DialogHeader>
+          <ContractorForm
+            contractor={editingContractor}
+            onSave={handleSave}
+            onCancel={() => { setIsDialogOpen(false); setEditingContractor(null); }}
+            regions={regions}
+            subRegions={subRegions}
+            taskTypes={taskTypes}
+            isProcessing={isProcessing}
+            settlements={settlements}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ContractorForm({ contractor, onSave, onCancel, regions, subRegions, taskTypes, isProcessing, settlements }) {
+  const [formData, setFormData] = useState(
+    contractor || {
+      contractor_id: '',
+      name: '',
+      phone: '',
+      email: '',
+      regions: [],
+      sub_regions: [],
+      priority_settlements: [],
+      task_types: [],
+      default_hours: '08:00-18:00',
+      priority: 'רגיל',
+      active: true
+    }
+  );
+
+  useEffect(() => {
+    if (contractor) {
+      setFormData({
+        ...contractor,
+        priority_settlements: contractor.priority_settlements || []
+      });
+    } else {
+      setFormData({
+        contractor_id: '',
+        name: '',
+        phone: '',
+        email: '',
+        regions: [],
+        sub_regions: [],
+        priority_settlements: [],
+        task_types: [],
+        default_hours: '08:00-18:00',
+        priority: 'רגיל',
+        active: true
+      });
+    }
+  }, [contractor]);
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleArrayChange = (field, value, checked) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: checked
+        ? [...new Set([...(prev[field] || []), value])]
+        : (prev[field] || []).filter(item => item !== value)
+    }));
+  };
+
+  // פונקציה לבחירה אוטומטית של תת-אזורים לפי אזור ותיקון לוגיקת הסרה
+  const handleRegionChange = (region, checked) => {
+    setFormData(prev => {
+      let newRegions;
+      let newSubRegions = [...(prev.sub_regions || [])]; // Start with current sub_regions
+
+      if (checked) {
+        newRegions = [...new Set([...(prev.regions || []), region])];
+        // Add sub-regions that belong to the newly checked region
+        const regionSubAreas = settlements
+          .filter(s => s.region === region && s.sub_region)
+          .map(s => s.sub_region);
+        regionSubAreas.forEach(sr => {
+          if (!newSubRegions.includes(sr)) {
+            newSubRegions.push(sr);
+          }
+        });
+      } else {
+        newRegions = (prev.regions || []).filter(r => r !== region);
+
+        // Get sub-regions specifically tied to the region that was just unchecked
+        const subRegionsFromUncheckedRegion = settlements
+          .filter(s => s.region === region && s.sub_region)
+          .map(s => s.sub_region);
+
+        // Determine all sub-regions that are covered by the *remaining* selected regions
+        const subRegionsFromRemainingSelectedRegions = new Set();
+        newRegions.forEach(selRegion => {
+          settlements
+            .filter(s => s.region === selRegion && s.sub_region)
+            .map(s => s.sub_region)
+            .forEach(sr => subRegionsFromRemainingSelectedRegions.add(sr));
+        });
+
+        // Filter newSubRegions:
+        // Keep a sub-region (sr) if:
+        // 1. It was NOT associated with the 'unchecked' region (meaning it's either manual or from another region entirely).
+        // OR
+        // 2. It WAS associated with the 'unchecked' region, BUT it is STILL covered by one of the *remaining* selected regions.
+        newSubRegions = newSubRegions.filter(sr => {
+          const wasFromUncheckedRegion = subRegionsFromUncheckedRegion.includes(sr);
+          const isStillCoveredByOtherSelectedRegion = subRegionsFromRemainingSelectedRegions.has(sr);
+
+          return !wasFromUncheckedRegion || isStillCoveredByOtherSelectedRegion;
+        });
+      }
+
+      return {
+        ...prev,
+        regions: newRegions,
+        sub_regions: newSubRegions
+      };
+    });
+  };
+
+  return (
+    <>
+      <div className="grid gap-4 py-4 max-h-96 overflow-y-auto">
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="contractor_id" className="text-right">מזהה קבלן</Label>
+          <Input
+            id="contractor_id"
+            name="contractor_id"
+            value={formData.contractor_id}
+            onChange={handleChange}
+            className="col-span-3"
+            placeholder="לדוגמה: CONT001"
+          />
+        </div>
+
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="name" className="text-right">שם קבלן</Label>
+          <Input
+            id="name"
+            name="name"
+            value={formData.name}
+            onChange={handleChange}
+            className="col-span-3"
+          />
+        </div>
+
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="phone" className="text-right">טלפון</Label>
+          <Input
+            id="phone"
+            name="phone"
+            value={formData.phone}
+            onChange={handleChange}
+            className="col-span-3"
+            placeholder="050-1234567"
+          />
+        </div>
+
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="email" className="text-right">אימייל (אופציונלי)</Label>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            value={formData.email}
+            onChange={handleChange}
+            className="col-span-3"
+            placeholder="contractor@company.com"
+          />
+        </div>
+
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="default_hours" className="text-right">שעות ברירת מחדל</Label>
+          <Input
+            id="default_hours"
+            name="default_hours"
+            value={formData.default_hours}
+            onChange={handleChange}
+            className="col-span-3"
+            placeholder="08:00-18:00"
+          />
+        </div>
+
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="priority" className="text-right">עדיפות</Label>
+          <Select value={formData.priority} onValueChange={(value) => setFormData(prev => ({...prev, priority: value}))}>
+            <SelectTrigger className="col-span-3">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="נמוך">נמוך</SelectItem>
+              <SelectItem value="רגיל">רגיל</SelectItem>
+              <SelectItem value="גבוה">גבוה</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* בחירת אזורים */}
+        <div className="border-t pt-4">
+          <Label className="text-sm font-semibold">אזורים (בחר אזורים שהקבלן משרת)</Label>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            {regions.map(region => (
+              <div key={region} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`region-${region}`}
+                  checked={formData.regions?.includes(region) || false}
+                  onCheckedChange={(checked) => handleRegionChange(region, checked)}
+                />
+                <Label htmlFor={`region-${region}`} className="text-sm">{region}</Label>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* בחירת תת-אזורים */}
+        <div className="border-t pt-4">
+          <Label className="text-sm font-semibold">תת-אזורים (תת-אזורים ספציפיים)</Label>
+          <div className="grid grid-cols-2 gap-2 mt-2 max-h-32 overflow-y-auto">
+            {subRegions.map(subRegion => (
+              <div key={subRegion} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`subregion-${subRegion}`}
+                  checked={formData.sub_regions?.includes(subRegion) || false}
+                  onCheckedChange={(checked) => handleArrayChange('sub_regions', subRegion, checked)}
+                />
+                <Label htmlFor={`subregion-${subRegion}`} className="text-sm">{subRegion}</Label>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* בחירת יישובי עדיפות */}
+        <div className="border-t pt-4">
+          <Label className="text-sm font-semibold flex items-center gap-2">
+            <span className="text-orange-600">⭐</span>
+            יישובים עדיפות (יישובים ספציפיים עם עדיפות גבוהה)
+          </Label>
+          <div className="grid grid-cols-1 gap-2 mt-2 max-h-40 overflow-y-auto bg-orange-50 p-3 rounded-lg border border-orange-200">
+            {settlements.map(settlement => (
+              <div key={settlement.id} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`priority-settlement-${settlement.id}`}
+                  checked={formData.priority_settlements?.includes(settlement.name) || false}
+                  onCheckedChange={(checked) => handleArrayChange('priority_settlements', settlement.name, checked)}
+                />
+                <Label htmlFor={`priority-settlement-${settlement.id}`} className="text-sm">
+                  {settlement.name}
+                  {settlement.region && (
+                    <span className="text-xs text-gray-500 mr-2">({settlement.region})</span>
+                  )}
+                </Label>
+              </div>
+            ))}
+            {settlements.length === 0 && (
+              <p className="text-sm text-gray-500">לא הוגדרו יישובים במערכת. נא להוסיף בטאב "יישובים".</p>
+            )}
+          </div>
+          <p className="text-xs text-orange-600 mt-2">
+            💡 יישובים אלו יקבלו עדיפות גבוהה בתיאום הטכנאי, גם אם הקבלן משרת אזור רחב יותר
+          </p>
+        </div>
+
+        {/* בחירת סוגי משימות */}
+        <div className="border-t pt-4">
+          <Label className="text-sm font-semibold">סוגי פק״עות שהקבלן יכול לבצע</Label>
+          <div className="grid grid-cols-1 gap-2 mt-2 max-h-32 overflow-y-auto">
+            {taskTypes.map(taskType => (
+              <div key={taskType.id} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`task-${taskType.id}`}
+                  checked={formData.task_types?.includes(taskType.type_name) || false}
+                  onCheckedChange={(checked) => handleArrayChange('task_types', taskType.type_name, checked)}
+                />
+                <Label htmlFor={`task-${taskType.id}`} className="text-sm">
+                  {taskType.type_name} ({taskType.duration_minutes} דקות)
+                </Label>
+              </div>
+            ))}
+            {taskTypes.length === 0 && (
+              <p className="text-sm text-gray-500">לא הוגדרו סוגי פק״עות במערכת. נא להוסיף בטאב "פק״עות".</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="active"
+            checked={formData.active}
+            onCheckedChange={(checked) => setFormData(prev => ({...prev, active: checked}))}
+          />
+          <Label htmlFor="active">קבלן פעיל</Label>
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>ביטול</Button>
+        <Button onClick={() => onSave(formData)} disabled={isProcessing}>
+          {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : 'שמור'}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}

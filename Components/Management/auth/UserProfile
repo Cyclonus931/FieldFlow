@@ -1,0 +1,122 @@
+import React, { useState, useEffect } from 'react';
+import { User } from '@/entities/User';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { 
+  User as UserIcon, 
+  Mail, 
+  Shield, 
+  LogOut, 
+  Loader2,
+  Settings 
+} from 'lucide-react';
+
+export default function UserProfile() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  const loadUser = async () => {
+    try {
+      const currentUser = await User.me();
+      setUser(currentUser);
+    } catch (error) {
+      console.error("Failed to load user:", error);
+    }
+    setLoading(false);
+  };
+
+  const handleLogout = async () => {
+    if (window.confirm('האם אתה בטוח שברצונך להתנתק?')) {
+      try {
+        await User.logout();
+        window.location.reload();
+      } catch (error) {
+        console.error("Failed to logout:", error);
+        alert('שגיאה בהתנתקות. נסה לרענן את הדף.');
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Card className="max-w-md mx-auto">
+        <CardContent className="p-6 text-center">
+          <p>לא מחובר למערכת</p>
+          <Button onClick={() => User.login()} className="mt-4">
+            התחבר למערכת
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="max-w-md mx-auto bg-white/90 backdrop-blur border-blue-200 shadow-lg">
+      <CardHeader className="text-center bg-gradient-to-r from-blue-50 to-green-50">
+        <div className="w-16 h-16 bg-gradient-to-r from-blue-400 to-green-400 rounded-full flex items-center justify-center mx-auto mb-3">
+          <UserIcon className="w-8 h-8 text-white" />
+        </div>
+        <CardTitle className="text-xl text-gray-900">
+          {user.full_name}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <Mail className="w-5 h-5 text-gray-500" />
+          <span className="text-gray-700">{user.email}</span>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <Shield className="w-5 h-5 text-gray-500" />
+          <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+            {user.role === 'admin' ? 'מנהל מערכת' : 'משתמש'}
+          </Badge>
+        </div>
+        
+        <div className="pt-4 border-t border-gray-200 space-y-2">
+          <p className="text-sm text-gray-600">
+            <strong>הרשאות נוכחיות:</strong>
+          </p>
+          <ul className="text-sm text-gray-600 space-y-1">
+            <li>• צפייה במפת יישובים</li>
+            <li>• חישוב מרחקים</li>
+            <li>• יצירת תיאומים</li>
+            <li>• צפייה ביומן</li>
+            {user.role === 'admin' && (
+              <>
+                <li>• ניהול יישובים וקבלנים</li>
+                <li>• ניהול משתמשים</li>
+                <li>• הגדרות מערכת</li>
+                <li>• תיאומים ידניים</li>
+              </>
+            )}
+          </ul>
+        </div>
+        
+        <div className="pt-4 border-t border-gray-200">
+          <Button 
+            variant="outline" 
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2 text-red-600 border-red-200 hover:bg-red-50"
+          >
+            <LogOut className="w-4 h-4" />
+            התנתק מהמערכת
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

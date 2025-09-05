@@ -1,0 +1,58 @@
+{
+  "name": "Appointment",
+  "type": "object",
+  "properties": {
+    "settlement_name": {
+      "type": "string",
+      "description": "שם היישוב"
+    },
+    "task_type": {
+      "type": "string",
+      "description": "סוג הפק''ע"
+    },
+    "contractor_id": {
+      "type": "string",
+      "description": "מזהה הקבלן"
+    },
+    "contractor_name": {
+      "type": "string",
+      "description": "שם הקבלן"
+    },
+    "appointment_date": {
+      "type": "string",
+      "format": "date",
+      "description": "תאריך התיאום"
+    },
+    "time_slot": {
+      "type": "string",
+      "description": "סלוט זמן (למשל: 08:00-09:00)"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "מתוכנן",
+        "בביצוע",
+        "הושלם",
+        "בוטל"
+      ],
+      "default": "מתוכנן",
+      "description": "סטטוס התיאום"
+    },
+    "notes": {
+      "type": "string",
+      "description": "הערות נוספות"
+    },
+    "manager_approval": {
+      "type": "boolean",
+      "default": false,
+      "description": "אישור מנהל (לחריגים)"
+    }
+  },
+  "required": [
+    "settlement_name",
+    "task_type",
+    "contractor_id",
+    "appointment_date",
+    "time_slot"
+  ]
+}

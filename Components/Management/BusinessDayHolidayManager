@@ -1,0 +1,339 @@
+import React, { useState, useEffect } from 'react';
+import { BlackoutDate } from '@/entities/BlackoutDate';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import {
+  PlusCircle,
+  Edit,
+  Trash2,
+  Loader2,
+  CalendarX,
+  Calendar,
+} from 'lucide-react';
+
+export default function BusinessDayHolidayManager() {
+  const [blackoutDates, setBlackoutDates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingDate, setEditingDate] = useState(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedItems, setSelectedItems] = useState([]);
+
+  useEffect(() => {
+    loadBlackoutDates();
+  }, []);
+
+  const loadBlackoutDates = async () => {
+    setLoading(true);
+    try {
+      const data = await BlackoutDate.list('-date');
+      setBlackoutDates(data);
+      setSelectedItems([]);
+    } catch (error) {
+      console.error('שגיאה בטעינת ימי חג:', error);
+    }
+    setLoading(false);
+  };
+
+  const handleSave = async (formData) => {
+    setIsProcessing(true);
+    try {
+      if (editingDate && editingDate.id) {
+        await BlackoutDate.update(editingDate.id, formData);
+      } else {
+        await BlackoutDate.create(formData);
+      }
+      setIsDialogOpen(false);
+      setEditingDate(null);
+      await loadBlackoutDates();
+    } catch (error) {
+      console.error('שגיאה בשמירה:', error);
+      alert('שגיאה בשמירת התאריך. נא לנסות שוב.');
+    }
+    setIsProcessing(false);
+  };
+
+  const handleDelete = async (dateId) => {
+    const dateToDelete = blackoutDates.find(d => d.id === dateId);
+    if (!dateToDelete) return;
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק את "${dateToDelete.description}" מתאריך ${new Date(dateToDelete.date).toLocaleDateString('he-IL')}?`)) {
+      try {
+        await BlackoutDate.delete(dateId);
+        await loadBlackoutDates();
+      } catch (error) {
+        console.error('שגיאה במחיקת תאריך:', error);
+        alert('שגיאה במחיקת התאריך. נא לנסות שוב.');
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedItems.length === 0) return;
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק ${selectedItems.length} תאריכים נבחרים?`)) {
+      setIsProcessing(true);
+      try {
+        await Promise.all(selectedItems.map(id => BlackoutDate.delete(id).catch(err => console.error(`Failed to delete date ${id}:`, err))));
+        setSelectedItems([]);
+        await loadBlackoutDates();
+      } catch (error) {
+        console.error('שגיאה במחיקה מרובה:', error);
+        alert('שגיאה במחיקה מרובה. חלק מהפריטים אולי לא נמחקו.');
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
+
+  const addCommonHolidays = async () => {
+    const currentYear = new Date().getFullYear();
+    const nextYear = currentYear + 1;
+    
+    // חגים נפוצים (תאריכים קבועים)
+    const commonHolidays = [
+      { date: `${currentYear}-01-01`, description: 'ראש השנה האזרחית' },
+      { date: `${currentYear}-04-14`, description: 'יום הזיכרון לשואה ולגבורה' },
+      { date: `${currentYear}-04-21`, description: 'יום הזיכרון לחללי צה"ל' },
+      { date: `${currentYear}-04-22`, description: 'יום העצמאות' },
+      { date: `${currentYear}-05-09`, description: 'יום ירושלים' },
+      { date: `${nextYear}-01-01`, description: 'ראש השנה האזרחית' },
+    ];
+
+    setIsProcessing(true);
+    try {
+      for (const holiday of commonHolidays) {
+        // בדוק אם התאריך כבר קיים
+        const exists = blackoutDates.some(d => d.date === holiday.date);
+        if (!exists) {
+          await BlackoutDate.create(holiday);
+        }
+      }
+      await loadBlackoutDates();
+      alert(`נוספו חגים נפוצים לשנים ${currentYear}-${nextYear}`);
+    } catch (error) {
+      console.error('שגיאה בהוספת חגים:', error);
+      alert('שגיאה בהוספת חגים. נא לנסות שוב.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedItems.length === blackoutDates.length && blackoutDates.length > 0) {
+      setSelectedItems([]);
+    } else {
+      setSelectedItems(blackoutDates.map(d => d.id));
+    }
+  };
+
+  const toggleSelectItem = (id) => {
+    setSelectedItems(prev =>
+      prev.includes(id)
+        ? prev.filter(item => item !== id)
+        : [...prev, id]
+    );
+  };
+
+  const openForm = (date = null) => {
+    setEditingDate(date);
+    setIsDialogOpen(true);
+  };
+
+  const isDateInPast = (dateString) => {
+    const today = new Date();
+    const checkDate = new Date(dateString);
+    today.setHours(0, 0, 0, 0);
+    return checkDate < today;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold">ימי עסקים וחגים</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            הגדר ימי חג ושבתונים שבהם לא מבוצעים תיאומים
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {selectedItems.length > 0 && (
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              className="flex items-center gap-2"
+              disabled={isProcessing}
+            >
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4"/>}
+              מחק נבחרים ({selectedItems.length})
+            </Button>
+          )}
+          <Button onClick={addCommonHolidays} variant="outline" disabled={isProcessing} className="flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            הוסף חגים נפוצים
+          </Button>
+          <Button onClick={() => openForm()} className="flex items-center gap-2">
+            <PlusCircle className="w-4 h-4" /> הוסף יום חג
+          </Button>
+        </div>
+      </div>
+
+      {/* הוראות */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h3 className="font-semibold text-blue-800 mb-2">הוראות</h3>
+        <div className="text-sm text-blue-700 space-y-1">
+          <p>• ימי חג ושבתונים שתוסיף כאן לא יוצגו כאפשרות בתיאום החכם</p>
+          <p>• מנהלי מערכת יכולים לעקוף מגבלה זו עם "אישור מנהל"</p>
+          <p>• השתמש ב"הוסף חגים נפוצים" להוספה מהירה של חגים ישראליים</p>
+          <p>• ימי שישי ושבת נחסמים אוטומטית (אין צורך להוסיף)</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center p-8">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto" />
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={blackoutDates.length > 0 && selectedItems.length === blackoutDates.length}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={blackoutDates.length === 0}
+                />
+              </TableHead>
+              <TableHead>תאריך</TableHead>
+              <TableHead>תיאור</TableHead>
+              <TableHead>סטטוס</TableHead>
+              <TableHead>פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {blackoutDates.map((date) => (
+              <TableRow key={date.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedItems.includes(date.id)}
+                    onCheckedChange={() => toggleSelectItem(date.id)}
+                  />
+                </TableCell>
+                <TableCell className="font-medium">
+                  {new Date(date.date).toLocaleDateString('he-IL')}
+                </TableCell>
+                <TableCell>{date.description}</TableCell>
+                <TableCell>
+                  {isDateInPast(date.date) ? (
+                    <Badge variant="secondary" className="bg-gray-100 text-gray-600">
+                      עבר
+                    </Badge>
+                  ) : (
+                    <Badge variant="default" className="bg-red-100 text-red-700">
+                      פעיל
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell className="flex gap-2">
+                  <Button variant="ghost" size="icon" onClick={() => openForm(date)}>
+                    <Edit className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(date.id)}>
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingDate ? 'עריכת יום חג' : 'הוספת יום חג חדש'}</DialogTitle>
+          </DialogHeader>
+          <BlackoutDateForm
+            date={editingDate}
+            onSave={handleSave}
+            onCancel={() => { setIsDialogOpen(false); setEditingDate(null); }}
+            isProcessing={isProcessing}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function BlackoutDateForm({ date, onSave, onCancel, isProcessing }) {
+  const [formData, setFormData] = useState(
+    date || {
+      date: '',
+      description: ''
+    }
+  );
+
+  useEffect(() => {
+    setFormData(date || {
+      date: '',
+      description: ''
+    });
+  }, [date]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  return (
+    <>
+      <div className="grid gap-4 py-4">
+        <div className="space-y-2">
+          <Label htmlFor="date">תאריך</Label>
+          <Input
+            id="date"
+            name="date"
+            type="date"
+            value={formData.date}
+            onChange={handleChange}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="description">תיאור</Label>
+          <Input
+            id="description"
+            name="description"
+            value={formData.description}
+            onChange={handleChange}
+            placeholder="לדוגמה: פסח, יום הזיכרון..."
+          />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel} disabled={isProcessing}>ביטול</Button>
+        <Button onClick={() => onSave(formData)} disabled={isProcessing}>
+          {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'שמור'}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}

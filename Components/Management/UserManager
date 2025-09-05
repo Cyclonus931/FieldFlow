@@ -1,0 +1,137 @@
+import React, { useState, useEffect } from 'react';
+import { User } from '@/entities/User';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, ShieldCheck, User as UserIcon, Info } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+
+export default function UserManager() {
+  const [users, setUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [updatingUserId, setUpdatingUserId] = useState(null);
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [allUsers, me] = await Promise.all([
+          User.list(),
+          User.me()
+        ]);
+        setUsers(allUsers);
+        setCurrentUser(me);
+      } catch (error) {
+        console.error("Failed to load user data:", error);
+      }
+      setLoading(false);
+    };
+    loadData();
+  }, []);
+
+  const handleRoleChange = async (userId, newRole) => {
+    if (userId === currentUser?.id && newRole === 'user') {
+      alert("אינך יכול לשנות את התפקיד של עצמך למשתמש רגיל.");
+      return;
+    }
+
+    setUpdatingUserId(userId);
+    try {
+      await User.update(userId, { role: newRole });
+      const updatedUsers = await User.list();
+      setUsers(updatedUsers);
+    } catch (error) {
+      console.error(`Failed to update role for user ${userId}:`, error);
+      alert("שגיאה בעדכון התפקיד. נא לרענן ולנסות שוב.");
+    }
+    setUpdatingUserId(null);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center p-8">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-2xl font-bold">ניהול משתמשים</h2>
+      
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>הוספת משתמשים חדשים</AlertTitle>
+        <AlertDescription>
+          להוספת משתמשים חדשים למערכת, השתמש בתפריט "הזמנת משתמשים" בפאנל הניהול הראשי של base44. 
+          לא ניתן להוסיף משתמשים ישירות דרך מסך זה.
+        </AlertDescription>
+      </Alert>
+      
+      <Alert>
+        <ShieldCheck className="h-4 w-4" />
+        <AlertTitle>ניהול הרשאות</AlertTitle>
+        <AlertDescription>
+          'מנהל' יכול לגשת למסכי ניהול המערכת. 'משתמש' יכול לצפות ולהשתמש בתפריט הראשי בלבד.
+        </AlertDescription>
+      </Alert>
+      
+      <div className="border rounded-lg">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>שם מלא</TableHead>
+              <TableHead>אימייל</TableHead>
+              <TableHead className="w-48">תפקיד</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {users.map((user) => (
+              <TableRow key={user.id}>
+                <TableCell className="font-medium flex items-center gap-2">
+                    <UserIcon className="w-4 h-4 text-gray-400"/>
+                    {user.full_name}
+                    {user.id === currentUser?.id && <Badge variant="outline">(את/ה)</Badge>}
+                </TableCell>
+                <TableCell>{user.email}</TableCell>
+                <TableCell>
+                  {updatingUserId === user.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Select
+                      value={user.role}
+                      onValueChange={(newRole) => handleRoleChange(user.id, newRole)}
+                      disabled={user.id === currentUser?.id}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">מנהל</SelectItem>
+                        <SelectItem value="user">משתמש</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}

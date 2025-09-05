@@ -1,0 +1,217 @@
+
+import React, { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { MapPin, Phone, Users, Clock } from "lucide-react";
+
+// תיקון אייקונים של Leaflet
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+const regionColors = {
+  'צפון': '#3B82F6',
+  'מרכז': '#10B981', 
+  'דרום': '#F59E0B',
+  'ירושלים': '#8B5CF6',
+  'יהודה ושומרון': '#EF4444',
+  'default': '#6B7280'
+};
+
+// פלטת צבעים עשירה ומגוונת לתתי-אזורים עם ניגודיות גבוהה
+const colorPalette = [
+  '#E53935', // Red
+  '#1E88E5', // Blue
+  '#43A047', // Green
+  '#8E24AA', // Purple
+  '#FB8C00', // Orange
+  '#00897B', // Teal
+  '#D81B60', // Pink
+  '#5E35B1', // Deep Purple
+  '#039BE5', // Cyan
+  '#F4511E', // Deep Orange
+  '#3949AB', // Indigo
+  '#C0CA33', // Lime
+  '#6D4C41', // Brown
+  '#7CB342', // Light Green
+  '#546E7A', // Blue Grey
+  '#FFB300', // Amber
+];
+
+// פונקציה ליצירת צבע ייחודי לתת-אזור
+const generateSubRegionColor = (subRegion, allSubRegions) => {
+  const index = allSubRegions.indexOf(subRegion);
+  // Use modulo operator to cycle through the color palette
+  return colorPalette[index % colorPalette.length];
+};
+
+export default function MapView({ settlements, selectedRegion, selectedSubRegion, onSettlementSelect }) {
+  const [map, setMap] = useState(null);
+
+  const filteredSettlements = settlements.filter(settlement => {
+    const regionMatch = !selectedRegion || selectedRegion === 'הכל' || settlement.region === selectedRegion;
+    const subRegionMatch = !selectedSubRegion || selectedSubRegion === 'הכל' || settlement.sub_region === selectedSubRegion;
+    return regionMatch && subRegionMatch && settlement.latitude && settlement.longitude;
+  });
+
+  // יצירת רשימה של כל התתי-אזורים הקיימים
+  // This needs to be derived once, preferably when settlements change, or before rendering.
+  // Using a useMemo or recalculating here is fine for now as settlements typically don't change very rapidly.
+  const allSubRegions = [...new Set(settlements.map(s => s.sub_region).filter(Boolean))].sort();
+
+
+  useEffect(() => {
+    if (map && filteredSettlements.length > 0) {
+      const group = new L.featureGroup(filteredSettlements.map(settlement => 
+        L.marker([settlement.latitude, settlement.longitude])
+      ));
+      map.fitBounds(group.getBounds().pad(0.1));
+    }
+  }, [map, filteredSettlements]);
+
+  const createCustomIcon = (color) => {
+    return L.divIcon({
+      className: 'custom-marker',
+      html: `<div style="
+        background-color: ${color}; 
+        width: 24px; 
+        height: 24px; 
+        border-radius: 50%; 
+        border: 3px solid white;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      ">
+        <div style="
+          width: 8px; 
+          height: 8px; 
+          background-color: white; 
+          border-radius: 50%;
+        "></div>
+      </div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
+  };
+
+  // פונקציה לקביעת צבע לפי תת-אזור או אזור
+  const getSettlementColor = (settlement) => {
+    // אם יש תת-אזור, השתמש בצבע דינמי לפי רשימת התתי-אזורים
+    if (settlement.sub_region) {
+      return generateSubRegionColor(settlement.sub_region, allSubRegions);
+    }
+    
+    // אחרת השתמש בצבע של האזור
+    if (settlement.region && regionColors[settlement.region]) {
+      return regionColors[settlement.region];
+    }
+    
+    // ברירת מחדל
+    return regionColors.default;
+  };
+
+  if (filteredSettlements.length === 0) {
+    return (
+      <Card className="h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-green-50">
+        <CardContent className="text-center p-8">
+          <MapPin className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-gray-600 mb-2">אין יישובים להציג</h3>
+          <p className="text-gray-500">נסה לשנות את הסינונים או להעלות קובץ נתונים</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="h-full w-full rounded-2xl overflow-hidden shadow-xl">
+      <MapContainer
+        center={[31.5, 34.75]} // מרכז ישראל
+        zoom={8}
+        className="h-full w-full"
+        whenCreated={setMap}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        
+        {filteredSettlements.map((settlement, index) => (
+          <Marker
+            key={index}
+            position={[settlement.latitude, settlement.longitude]}
+            icon={createCustomIcon(getSettlementColor(settlement))}
+            eventHandlers={{
+              click: () => onSettlementSelect && onSettlementSelect(settlement)
+            }}
+          >
+            <Popup className="custom-popup" maxWidth={300}>
+              <div className="p-1">
+                <div className="flex items-center gap-2 mb-3">
+                  <div 
+                    className="w-4 h-4 rounded-full border-2 border-white shadow-md"
+                    style={{ backgroundColor: getSettlementColor(settlement) }}
+                  />
+                  <h3 className="font-bold text-lg text-gray-900">{settlement.name}</h3>
+                </div>
+                
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-blue-500" />
+                    <span>{settlement.region} • {settlement.sub_region}</span>
+                  </div>
+                  
+                  {settlement.address && (
+                    <div className="text-gray-600">
+                      📍 {settlement.address}
+                    </div>
+                  )}
+                  
+                  {settlement.contractor_1 && (
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4 text-green-500" />
+                      <span>קבלן ראשי: {settlement.contractor_1}</span>
+                    </div>
+                  )}
+                  
+                  {settlement.arrival_days && settlement.arrival_days.length > 0 && (
+                    <div className="flex items-start gap-2">
+                      <Clock className="w-4 h-4 text-orange-500 mt-0.5" />
+                      <div>
+                        <div className="font-medium">ימי הגעה:</div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {settlement.arrival_days.map((day, i) => (
+                            <Badge key={i} variant="secondary" className="text-xs">
+                              {day}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+      
+      <style jsx>{`
+        .custom-popup .leaflet-popup-content-wrapper {
+          border-radius: 12px;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+          border: none;
+        }
+        .custom-popup .leaflet-popup-tip {
+          border-top-color: white;
+        }
+      `}</style>
+    </div>
+  );
+}

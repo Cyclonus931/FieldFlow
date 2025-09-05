@@ -1,0 +1,311 @@
+
+import React, { useState, useEffect } from 'react';
+import { TaskType } from '@/entities/TaskType';
+import { Contractor } from '@/entities/Contractor';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { PlusCircle, Edit, Trash2, Loader2, Wrench } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+
+export default function TaskTypeManager() {
+  const [taskTypes, setTaskTypes] = useState([]);
+  const [contractors, setContractors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingTaskType, setEditingTaskType] = useState(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedItems, setSelectedItems] = useState([]);
+
+  useEffect(() => {
+    loadTaskTypes();
+  }, []);
+
+  const loadTaskTypes = async () => {
+    setLoading(true);
+    try {
+      const [taskTypeData, contractorData] = await Promise.all([
+        TaskType.list('-created_date'),
+        Contractor.list()
+      ]);
+      setTaskTypes(taskTypeData);
+      setContractors(contractorData);
+      setSelectedItems([]);
+    } catch (error) {
+      console.error('שגיאה בטעינת נתונים:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkTaskTypeDependencies = (taskTypeName) => {
+    const dependentContractors = contractors.filter(contractor =>
+      contractor.task_types && contractor.task_types.includes(taskTypeName)
+    );
+    return dependentContractors;
+  };
+
+  const handleSave = async (formData) => {
+    setIsProcessing(true);
+    try {
+      // Ensure numeric fields are numbers
+      const payload = {
+        ...formData,
+        duration_minutes: Number(formData.duration_minutes),
+        sla_days: Number(formData.sla_days),
+      };
+
+      if (editingTaskType && editingTaskType.id) {
+        await TaskType.update(editingTaskType.id, payload);
+      } else {
+        await TaskType.create(payload);
+      }
+      setIsDialogOpen(false);
+      setEditingTaskType(null);
+      await loadTaskTypes();
+    } catch (error) {
+      console.error('שגיאה בשמירת סוג פק"ע:', error);
+    }
+    setIsProcessing(false);
+  };
+
+  const handleDelete = async (taskTypeId) => {
+    const taskType = taskTypes.find(t => t.id === taskTypeId);
+    if (!taskType) return;
+
+    const dependentContractors = checkTaskTypeDependencies(taskType.type_name);
+
+    if (dependentContractors.length > 0) {
+      const contractorNames = dependentContractors.map(c => c.name).join(', ');
+      alert(`לא ניתן למחוק את סוג הפק"ע "${taskType.type_name}" מכיוון שהוא משויך לקבלנים הבאים: ${contractorNames}`);
+      return;
+    }
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק את סוג הפק"ע "${taskType.type_name}"?`)) {
+      try {
+        await TaskType.delete(taskTypeId);
+        await loadTaskTypes();
+      } catch (error) {
+        console.error('שגיאה במחיקת סוג פק"ע:', error);
+        alert('שגיאה במחיקת סוג הפק"ע. נא לנסות שוב.');
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedItems.length === 0) return;
+
+    // בדיקת תלויות עבור כל הפריטים הנבחרים
+    const dependencyErrors = [];
+
+    selectedItems.forEach(id => {
+      const taskType = taskTypes.find(t => t.id === id);
+      if (taskType) {
+        const dependentContractors = checkTaskTypeDependencies(taskType.type_name);
+        if (dependentContractors.length > 0) {
+          dependencyErrors.push(`${taskType.type_name}: ${dependentContractors.map(c => c.name).join(', ')}`);
+        }
+      }
+    });
+
+    if (dependencyErrors.length > 0) {
+      alert(`לא ניתן למחוק את סוגי הפק"עות הבאים מכיוון שהם משויכים לקבלנים:\n\n${dependencyErrors.join('\n')}`);
+      return;
+    }
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק ${selectedItems.length} סוגי פק"עות נבחרים?`)) {
+      setIsProcessing(true);
+      try {
+        await Promise.all(selectedItems.map(id => TaskType.delete(id).catch(err => console.error(`Failed to delete task type ${id}:`, err))));
+        setSelectedItems([]);
+        await loadTaskTypes();
+      } catch (error) {
+        console.error('שגיאה במחיקה מרובה של סוגי פק"עות:', error);
+        alert('שגיאה במחיקה מרובה של סוגי הפק"עות. חלק מהפריטים אולי לא נמחקו.');
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedItems.length === taskTypes.length && taskTypes.length > 0) {
+      setSelectedItems([]);
+    } else {
+      setSelectedItems(taskTypes.map(t => t.id));
+    }
+  };
+
+  const toggleSelectItem = (id) => {
+    setSelectedItems(prev =>
+      prev.includes(id)
+        ? prev.filter(item => item !== id)
+        : [...prev, id]
+    );
+  };
+
+  const openForm = (taskType = null) => {
+    setEditingTaskType(taskType);
+    setIsDialogOpen(true);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">ניהול סוגי פק"עות</h2>
+        <div className="flex gap-2">
+          {selectedItems.length > 0 && (
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              className="flex items-center gap-2"
+              disabled={isProcessing}
+            >
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4"/>}
+              מחק נבחרים ({selectedItems.length})
+            </Button>
+          )}
+          <Button onClick={() => openForm()} className="flex items-center gap-2">
+            <PlusCircle className="w-4 h-4" /> הוסף סוג פק"ע
+          </Button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center p-8">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto" />
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={taskTypes.length > 0 && selectedItems.length === taskTypes.length}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={taskTypes.length === 0}
+                />
+              </TableHead>
+              <TableHead>שם פק"ע</TableHead>
+              <TableHead>משך בדקות</TableHead>
+              <TableHead>SLA בימים</TableHead>
+              <TableHead>תיאור</TableHead>
+              <TableHead>פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {taskTypes.map((task) => (
+              <TableRow key={task.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedItems.includes(task.id)}
+                    onCheckedChange={() => toggleSelectItem(task.id)}
+                  />
+                </TableCell>
+                <TableCell className="font-medium">{task.type_name}</TableCell>
+                <TableCell>{task.duration_minutes}</TableCell>
+                <TableCell>{task.sla_days}</TableCell>
+                <TableCell className="max-w-xs truncate">{task.description}</TableCell>
+                <TableCell className="flex gap-2">
+                  <Button variant="ghost" size="icon" onClick={() => openForm(task)}>
+                    <Edit className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(task.id)}>
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingTaskType ? 'עריכת סוג פק"ע' : 'הוספת סוג פק"ע חדש'}</DialogTitle>
+          </DialogHeader>
+          <TaskTypeForm
+            taskType={editingTaskType}
+            onSave={handleSave}
+            onCancel={() => { setIsDialogOpen(false); setEditingTaskType(null); }}
+            isProcessing={isProcessing}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function TaskTypeForm({ taskType, onSave, onCancel, isProcessing }) {
+  const [formData, setFormData] = useState(
+    taskType || {
+      type_name: '',
+      duration_minutes: '',
+      sla_days: '',
+      description: '',
+    }
+  );
+
+  useEffect(() => {
+    // Update form data if taskType prop changes (e.g., when opening form for edit)
+    setFormData(
+      taskType || {
+        type_name: '',
+        duration_minutes: '',
+        sla_days: '',
+        description: '',
+      }
+    );
+  }, [taskType]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  return (
+    <>
+      <div className="grid gap-4 py-4">
+        <div className="space-y-2">
+          <Label htmlFor="type_name">שם הפק"ע</Label>
+          <Input id="type_name" name="type_name" value={formData.type_name} onChange={handleChange} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="duration_minutes">משך בדקות</Label>
+          <Input id="duration_minutes" name="duration_minutes" type="number" value={formData.duration_minutes} onChange={handleChange} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="sla_days">SLA (בימי עסקים)</Label>
+          <Input id="sla_days" name="sla_days" type="number" value={formData.sla_days} onChange={handleChange} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="description">תיאור (אופציונלי)</Label>
+          <Textarea id="description" name="description" value={formData.description} onChange={handleChange} />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel} disabled={isProcessing}>ביטול</Button>
+        <Button onClick={() => onSave(formData)} disabled={isProcessing}>
+          {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'שמור'}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}

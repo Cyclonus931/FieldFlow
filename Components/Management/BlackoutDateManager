@@ -1,0 +1,152 @@
+import React, { useState, useEffect } from 'react';
+import { BlackoutDate } from '@/entities/BlackoutDate';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { PlusCircle, Trash2, Loader2, CalendarOff } from 'lucide-react';
+
+export default function BlackoutDateManager() {
+  const [blackoutDates, setBlackoutDates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [newDate, setNewDate] = useState({ date: '', description: '' });
+
+  useEffect(() => {
+    loadDates();
+  }, []);
+
+  const loadDates = async () => {
+    setLoading(true);
+    try {
+      const data = await BlackoutDate.list('-date');
+      setBlackoutDates(data);
+    } catch (error) {
+      console.error('שגיאה בטעינת ימים ללא עבודה:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!newDate.date || !newDate.description) {
+      alert('יש למלא תאריך ותיאור.');
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      await BlackoutDate.create(newDate);
+      setIsDialogOpen(false);
+      setNewDate({ date: '', description: '' });
+      await loadDates();
+    } catch (error) {
+      console.error('שגיאה בשמירת תאריך:', error);
+    }
+    setIsProcessing(false);
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm('האם אתה בטוח שברצונך למחוק תאריך זה?')) {
+      try {
+        await BlackoutDate.delete(id);
+        await loadDates();
+      } catch (error) {
+        console.error('שגיאה במחיקת תאריך:', error);
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <div>
+            <h2 className="text-2xl font-bold">ניהול ימים ללא עבודה (חגים ושבתונים)</h2>
+            <p className="text-sm text-gray-600">המערכת תתעלם מתאריכים אלו בחישוב SLA ותיאומים</p>
+        </div>
+        <Button onClick={() => setIsDialogOpen(true)} className="flex items-center gap-2">
+          <PlusCircle className="w-4 h-4" /> הוסף תאריך
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="text-center p-8">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto" />
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>תאריך</TableHead>
+              <TableHead>תיאור</TableHead>
+              <TableHead>פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {blackoutDates.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell className="font-medium">
+                  {new Date(item.date).toLocaleDateString('he-IL')}
+                </TableCell>
+                <TableCell>{item.description}</TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)}>
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>הוספת יום ללא עבודה</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="date">תאריך</Label>
+              <Input
+                id="date"
+                type="date"
+                value={newDate.date}
+                onChange={(e) => setNewDate(prev => ({...prev, date: e.target.value}))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="description">תיאור</Label>
+              <Input
+                id="description"
+                value={newDate.description}
+                onChange={(e) => setNewDate(prev => ({...prev, description: e.target.value}))}
+                placeholder="לדוגמה: פסח, יום העצמאות"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isProcessing}>ביטול</Button>
+            <Button onClick={handleSave} disabled={isProcessing}>
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'שמור'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

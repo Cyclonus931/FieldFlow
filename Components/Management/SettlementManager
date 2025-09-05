@@ -1,0 +1,902 @@
+
+import React, { useState, useEffect } from 'react';
+import { Settlement } from '@/entities/Settlement';
+import { ContractorAvailability } from '@/entities/ContractorAvailability';
+import { Appointment } from '@/entities/Appointment';
+import { SystemConfig } from '@/entities/SystemConfig';
+import { ExtractDataFromUploadedFile, UploadFile, InvokeLLM } from '@/integrations/Core';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Upload,
+  PlusCircle,
+  Plus, // Added Plus icon for sample data button
+  Edit,
+  Trash2,
+  Loader2,
+  FileSpreadsheet,
+  AlertTriangle,
+  CheckCircle,
+  Download,
+  Search,
+  RefreshCw
+} from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+
+// קריאה לקבלת קואורדינטות באמצעות InvokeLLM
+const getCoordinates = async (settlementName, apiKey) => {
+  // apiKey is not directly used here, but its presence indicates this function can be run.
+  // The LLM integration abstracts the actual Google Maps API key usage.
+  if (!apiKey) {
+      console.log("No API key available for geocoding.");
+      return null;
+  }
+
+  try {
+      const prompt = `Find the precise geographic coordinates (latitude and longitude) for the following settlement in Israel: "${settlementName}".`;
+      
+      const response = await InvokeLLM({
+          prompt,
+          add_context_from_internet: true,
+          response_json_schema: {
+              type: "object",
+              properties: {
+                  latitude: { type: "number" },
+                  longitude: { type: "number" }
+              },
+              required: ["latitude", "longitude"]
+          }
+      });
+
+      if (response && response.latitude && response.longitude) {
+          return {
+              latitude: response.latitude,
+              longitude: response.longitude
+          };
+      }
+      console.warn(`Could not geocode ${settlementName}: No coordinates found in response.`);
+      return null;
+
+  } catch (error) {
+      console.error(`Could not get coordinates for ${settlementName}:`, error);
+      return null;
+  }
+};
+
+// פונקציה לעיצוב הזמן הנותר
+const formatTime = (ms) => {
+  if (ms < 0) ms = 0;
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) {
+    return `כ-${minutes} דקות ו-${seconds} שניות`;
+  }
+  return `כ-${seconds} שניות`;
+};
+
+export default function SettlementManager() {
+  const [settlements, setSettlements] = useState([]);
+  const [contractorAvailabilities, setContractorAvailabilities] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingSettlement, setEditingSettlement] = useState(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState({ message: null, type: null, working: false, progress: 0, total: 0, remainingTime: null });
+  const [updateCoordsStatus, setUpdateCoordsStatus] = useState({ message: null, type: null, working: false, progress: 0 }); // New state for coordinate update
+
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [apiKey, setApiKey] = useState(null); // Added state for API key
+
+  useEffect(() => {
+    loadSettlements();
+  }, []);
+
+  const loadSettlements = async () => {
+    setLoading(true);
+    try {
+      const [settlementData, availabilityData, appointmentData, configData] = await Promise.all([
+        Settlement.list('-created_date'),
+        ContractorAvailability.list(),
+        Appointment.list(),
+        SystemConfig.filter({ key: "google_maps_api_key" }) // Fetch Google Maps API key
+      ]);
+      setSettlements(settlementData);
+      setContractorAvailabilities(availabilityData);
+      setAppointments(appointmentData);
+      setSelectedItems([]);
+      
+      // Load API key
+      if (configData.length > 0 && configData[0].value) {
+        setApiKey(configData[0].value);
+      } else {
+        setApiKey(null); // Ensure API key is null if not found
+      }
+    } catch (error) {
+      console.error('שגיאה בטעינת נתונים:', error);
+    }
+    setLoading(false);
+  };
+
+  const checkSettlementDependencies = (settlementName) => {
+    const dependencies = [];
+    
+    // בדיקת זמינויות ספציפיות
+    const availabilities = contractorAvailabilities.filter(av => av.settlement_name === settlementName);
+    if (availabilities.length > 0) {
+      dependencies.push(`${availabilities.length} זמינויות ספציפיות`);
+    }
+
+    // בדיקת תיאומים
+    const settlementAppointments = appointments.filter(app => app.settlement_name === settlementName);
+    if (settlementAppointments.length > 0) {
+      dependencies.push(`${settlementAppointments.length} תיאומים`);
+    }
+
+    return dependencies;
+  };
+
+  const addSampleSettlements = async () => {
+    const sampleData = [
+      {
+        name: "בית אורן", 
+        region: "הגליל העליון", 
+        sub_region: "מרום הגליל",
+        latitude: 33.1539, 
+        longitude: 35.5075,
+        contact_person: "יוסי כהן",
+        contact_person_phone: "050-1234567",
+        operating_hours: "08:00-16:00"
+      },
+      {
+        name: "נווה חריף", 
+        region: "הנגב הצפוני", 
+        sub_region: "באר שבע",
+        latitude: 31.2501, 
+        longitude: 34.7913,
+        contact_person: "רחל לוי",
+        contact_person_phone: "050-7654321",
+        operating_hours: "07:00-15:00"
+      },
+      {
+        name: "תל אביב", 
+        region: "המרכז", 
+        sub_region: "גוש דן",
+        latitude: 32.0853, 
+        longitude: 34.7818,
+        contact_person: "דני ישראלי",
+        contact_person_phone: "050-9876543",
+        operating_hours: "08:00-18:00"
+      },
+      {
+        name: "ירושלים", 
+        region: "ירושלים", 
+        sub_region: "ירושלים",
+        latitude: 31.7683, 
+        longitude: 35.2137,
+        contact_person: "מרים כהן",
+        contact_person_phone: "050-1122334",
+        operating_hours: "08:00-17:00"
+      },
+      {
+        name: "חיפה", 
+        region: "הצפון", 
+        sub_region: "חיפה והקריות",
+        latitude: 32.7940, 
+        longitude: 34.9896,
+        contact_person: "אבי דוידי",
+        contact_person_phone: "050-4455667",
+        operating_hours: "07:30-16:30"
+      }
+    ];
+
+    try {
+      setIsProcessing(true); // Indicate processing
+      for (let settlement of sampleData) {
+        await Settlement.create(settlement);
+      }
+      alert(`נוצרו ${sampleData.length} יישובי דוגמא בהצלחה!`);
+      await loadSettlements();
+    } catch (error) {
+      alert(`שגיאה ביצירת יישובי דוגמא: ${error.message}`);
+    } finally {
+      setIsProcessing(false); // End processing
+    }
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // בדיקת סוג הקובץ
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setUploadStatus({
+        message: 'נא להעלות קובץ CSV בלבד. ניתן לייצא מאקסל לפורמט CSV.',
+        type: 'error',
+        working: false,
+        progress: 0,
+        total: 0,
+        remainingTime: null
+      });
+      event.target.value = '';
+      return;
+    }
+
+    setUploadStatus({ message: 'מעלה קובץ...', type: 'info', working: true, progress: 0, total: 0, remainingTime: null });
+
+    try {
+      const { file_url } = await UploadFile({ file });
+      setUploadStatus(prev => ({ ...prev, message: 'מעבד נתונים מהקובץ...' }));
+
+      const extractionResult = await ExtractDataFromUploadedFile({
+        file_url,
+        json_schema: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              "יישוב": { type: "string" },
+              "שם יישוב": { type: "string" },
+              "איזור": { type: "string" },
+              "תת איזור": { type: "string" },
+              "תת-איזור": { type: "string" },
+              "כתובת": { type: "string" },
+              "Latitude": { type: ["string", "number"] },
+              "קו רוחב": { type: ["string", "number"] },
+              "Longitude": { type: ["string", "number"] },
+              "קו אורך": { type: ["string", "number"] },
+              "איש קשר ביישוב": { type: "string" },
+              "איש קשר": { type: "string" },
+              "טלפון איש קשר": { type: "string" },
+              "טלפון": { type: "string" },
+              "שעות פעילות": { type: "string" },
+              "קבלן ראשי": { type: "string" },
+              "קבלן משני": { type: "string" },
+              "ימי הגעה": { type: "string" },
+              "סלוטים זמינים": { type: "string" },
+              "הערות": { type: "string" }
+            },
+          },
+        },
+      });
+
+      if (extractionResult.status === "success" && extractionResult.output) {
+        const newSettlementsData = Array.isArray(extractionResult.output) ? extractionResult.output : [extractionResult.output];
+        const total = newSettlementsData.length;
+        let addedCount = 0;
+        const startTime = Date.now();
+
+        setUploadStatus(prev => ({ ...prev, total }));
+
+        for (let i = 0; i < newSettlementsData.length; i++) {
+          const item = newSettlementsData[i];
+          const processedCount = i + 1;
+          const elapsed = Date.now() - startTime;
+          const estimatedTotalTime = (elapsed / processedCount) * total;
+          const remainingTime = estimatedTotalTime - elapsed;
+
+          const progress = (processedCount / total) * 100;
+          
+          // קבלת שם היישוב (תמיכה בשתי אפשרויות)
+          const settlementName = item["יישוב"] || item["שם יישוב"];
+          
+          setUploadStatus(prev => ({ 
+            ...prev,
+            message: `מעבד ${processedCount}/${total}: ${settlementName || ''}`, 
+            progress: progress,
+            remainingTime: formatTime(remainingTime)
+          }));
+
+          // טיפול בקואורדינטות מהקובץ
+          let coords = null;
+          
+          // נסה לקבל קואורדינטות מהקובץ תחילה
+          const latFromFile = item["Latitude"] || item["קו רוחב"];
+          const lonFromFile = item["Longitude"] || item["קו אורך"];
+          
+          if (latFromFile && lonFromFile) {
+            // המרה למספרים אם הם מגיעים כטקסט
+            const lat = typeof latFromFile === 'string' ? parseFloat(latFromFile) : latFromFile;
+            const lon = typeof lonFromFile === 'string' ? parseFloat(lonFromFile) : lonFromFile;
+            
+            // בדיקה שהקואורדינטות תקינות (בטווח סביר לישראל)
+            if (!isNaN(lat) && !isNaN(lon) && 
+                lat >= 29 && lat <= 34 && 
+                lon >= 34 && lon <= 36) {
+              coords = { latitude: lat, longitude: lon };
+              console.log(`נמצאו קואורדינטות בקובץ עבור ${settlementName}:`, coords);
+            } else {
+              console.warn(`קואורדינטות לא תקינות בקובץ עבור ${settlementName} (lat: ${lat}, lon: ${lon}). מנסה לקבל באמצעות LLM.`);
+            }
+          }
+          
+          // אם לא נמצאו קואורדינטות תקינות בקובץ, נסה לחפש אותם
+          if (!coords && settlementName) {
+            coords = await getCoordinates(settlementName, apiKey);
+          }
+          
+          // עיבוד ימי הגעה
+          let arrivalDays = [];
+          if (item["ימי הגעה"]) {
+            arrivalDays = item["ימי הגעה"].split(',').map(day => day.trim()).filter(day => day);
+          }
+
+          // עיבוד סלוטים זמינים
+          let timeSlots = [];
+          if (item["סלוטים זמינים"]) {
+            timeSlots = item["סלוטים זלוטים"].split(',').map(slot => slot.trim()).filter(slot => slot);
+          }
+
+          const settlementPayload = {
+            name: settlementName,
+            region: item["איזור"],
+            sub_region: item["תת איזור"] || item["תת-איזור"],
+            address: item["כתובת"],
+            contact_person: item["איש קשר ביישוב"] || item["איש קשר"],
+            contact_person_phone: item["טלפון איש קשר"] || item["טלפון"],
+            operating_hours: item["שעות פעילות"],
+            contractor_1: item["קבלן ראשי"],
+            contractor_2: item["קבלן משני"],
+            arrival_days: arrivalDays,
+            time_slots: timeSlots,
+            latitude: coords?.latitude,
+            longitude: coords?.longitude,
+            notes: item["הערות"]
+          };
+          
+          await Settlement.create(settlementPayload);
+          addedCount++;
+        }
+
+        setUploadStatus({ message: `העלאה ועיבוד הושלמו. נוספו ${addedCount} יישובים.`, type: 'success', working: false, progress: 100, remainingTime: null });
+        await loadSettlements();
+
+      } else {
+        throw new Error(extractionResult.details || 'שגיאה בעיבוד הקובץ');
+      }
+    } catch (err) {
+      setUploadStatus({ message: `שגיאה בהעלאת הקובץ: ${err.message}`, type: 'error', working: false, progress: 0, total: 0, remainingTime: null });
+    }
+    event.target.value = '';
+  };
+
+  const handleSave = async (formData) => {
+    setIsProcessing(true);
+    const payload = { ...formData };
+
+    // If latitude or longitude are provided manually, use them.
+    // Otherwise, attempt to get them via getCoordinates.
+    if ((payload.latitude === null || payload.latitude === '') || (payload.longitude === null || payload.longitude === '')) {
+      const coords = await getCoordinates(payload.name, apiKey); // Pass apiKey
+      if(coords) {
+        payload.latitude = coords.latitude;
+        payload.longitude = coords.longitude;
+      }
+    }
+
+    if (editingSettlement && editingSettlement.id) {
+      await Settlement.update(editingSettlement.id, payload);
+    } else {
+      await Settlement.create(payload);
+    }
+
+    setIsProcessing(false);
+    setIsDialogOpen(false);
+    setEditingSettlement(null);
+    await loadSettlements();
+  };
+
+  const handleDelete = async (settlementId) => {
+    const settlement = settlements.find(s => s.id === settlementId);
+    if (!settlement) return;
+
+    const dependencies = checkSettlementDependencies(settlement.name);
+    
+    if (dependencies.length > 0) {
+      alert(`לא ניתן למחוק את היישוב "${settlement.name}" מכיוון שהוא משויך ל: ${dependencies.join(', ')}`);
+      return;
+    }
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק את היישוב "${settlement.name}"?`)) {
+      try {
+        await Settlement.delete(settlementId);
+        await loadSettlements();
+      } catch (error) {
+        console.error('שגיאה במחיקת יישוב:', error);
+        alert('שגיאה במחיקת היישוב. נא לנסות שוב.');
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedItems.length === 0) return;
+
+    // בדיקת תלויות עבור כל הפריטים הנבחרים
+    const dependencyErrors = [];
+    
+    selectedItems.forEach(id => {
+      const settlement = settlements.find(s => s.id === id);
+      if (settlement) {
+        const dependencies = checkSettlementDependencies(settlement.name);
+        if (dependencies.length > 0) {
+          dependencyErrors.push(`${settlement.name}: ${dependencies.join(', ')}`);
+        }
+      }
+    });
+
+    if (dependencyErrors.length > 0) {
+      alert(`לא ניתן למחוק את היישובים הבאים מכיוון שהם משויכים ליישויות אחרות:\n\n${dependencyErrors.join('\n')}`);
+      return;
+    }
+
+    if (window.confirm(`האם אתה בטוח שברצונך למחוק ${selectedItems.length} יישובים נבחרים?`)) {
+      setIsProcessing(true);
+      await Promise.all(selectedItems.map(id => Settlement.delete(id).catch(err => console.error(`Failed to delete settlement ${id}:`, err))));
+      setSelectedItems([]);
+      setIsProcessing(false);
+      await loadSettlements();
+    }
+  };
+
+  const handleUpdateAllCoordinates = async () => {
+    if (!apiKey) {
+      alert("יש להגדיר מפתח Google Maps API במסך הניהול לפני שניתן לעדכן קואורדינטות.");
+      return;
+    }
+    if (!window.confirm(`פעולה זו תנסה לעדכן קואורדינטות עבור כל ${settlements.length} היישובים באמצעות Google Maps API. הפעולה עשויה לקחת זמן. האם להמשיך?`)) {
+      return;
+    }
+    setUpdateCoordsStatus({ working: true, message: 'מתחיל עדכון קואורדינטות עם Google Maps API...', progress: 0, type: 'info' });
+    
+    let updatedCount = 0;
+    const settlementsToUpdate = [...settlements]; // Create a copy to iterate
+    for (let i = 0; i < settlementsToUpdate.length; i++) {
+      const settlement = settlementsToUpdate[i];
+      try {
+        const coords = await getCoordinates(settlement.name, apiKey);
+        if (coords && (settlement.latitude !== coords.latitude || settlement.longitude !== coords.longitude)) { // Only update if coordinates changed
+          await Settlement.update(settlement.id, { latitude: coords.latitude, longitude: coords.longitude });
+          updatedCount++;
+        }
+      } catch (err) {
+        console.error(`Failed to update coordinates for ${settlement.name}:`, err);
+      }
+      setUpdateCoordsStatus(prev => ({
+        ...prev,
+        progress: ((i + 1) / settlementsToUpdate.length) * 100,
+        message: `מעדכן ${i + 1}/${settlementsToUpdate.length}: ${settlement.name}`
+      }));
+    }
+    setUpdateCoordsStatus({ working: false, message: `העדכון הושלם! ${updatedCount} יישובים עודכנו בהצלחה באמצעות Google Maps API.`, type: 'success', progress: 100 });
+    await loadSettlements(); // Reload all settlements to reflect changes
+  };
+
+  const toggleSelectAll = () => {
+    if (settlements.length > 0 && selectedItems.length === settlements.length) {
+      setSelectedItems([]);
+    } else {
+      setSelectedItems(settlements.map(s => s.id));
+    }
+  };
+
+  const toggleSelectItem = (id) => {
+    setSelectedItems(prev =>
+      prev.includes(id)
+        ? prev.filter(item => item !== id)
+        : [...prev, id]
+    );
+  };
+
+  const openForm = (settlement = null) => {
+    setEditingSettlement(settlement);
+    setIsDialogOpen(true);
+  };
+
+  const exportToExcel = () => {
+    const csvContent = [
+      ['שם יישוב', 'אזור', 'תת-אזור', 'כתובת', 'קו רוחב', 'קו אורך', 'ימי הגעה', 'קבלן ראשי', 'קבלן משני', 'סלוטים', 'איש קשר', 'טלפון איש קשר', 'שעות פעילות', 'הערות'].join(','),
+      ...settlements.map(s => [
+        s.name || '',
+        s.region || '',
+        s.sub_region || '',
+        s.address || '',
+        s.latitude || '',
+        s.longitude || '',
+        Array.isArray(s.arrival_days) ? s.arrival_days.join(';') : '',
+        s.contractor_1 || '',
+        s.contractor_2 || '',
+        Array.isArray(s.time_slots) ? s.time_slots.join(';') : '',
+        s.contact_person || '',
+        s.contact_person_phone || '',
+        s.operating_hours || '',
+        s.notes || ''
+      ].map(field => {
+        // Escape double quotes by doubling them, then wrap the field in double quotes
+        const stringField = String(field);
+        return `"${stringField.replace(/"/g, '""')}"`;
+      }).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'settlements.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // סינון ומיון יישובים
+  const filteredAndSortedSettlements = settlements
+    .filter(s => !searchTerm || s.name?.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      let aValue = a[sortBy] || '';
+      let bValue = b[sortBy] || '';
+      
+      if (typeof aValue === 'string') {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+      
+      if (sortOrder === 'asc') {
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+      } else {
+        return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
+      }
+    });
+
+  const handleSort = (column) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortOrder('asc');
+    }
+  };
+
+  const SettlementForm = ({ settlement, onSave, onCancel }) => {
+    const [formData, setFormData] = useState(
+      settlement || {
+        name: '',
+        region: '',
+        sub_region: '',
+        contact_person: '',
+        contact_person_phone: '',
+        operating_hours: '',
+        latitude: '',
+        longitude: '',
+        notes: ''
+      }
+    );
+
+    const handleChange = (e) => {
+      const { name, value } = e.target;
+      setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleNumberChange = (e) => {
+      const { name, value } = e.target;
+      // המרה למספר או השארה ריקה
+      const numValue = value === '' ? '' : parseFloat(value);
+      setFormData(prev => ({ ...prev, [name]: numValue }));
+    };
+
+    return (
+      <>
+        <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto pr-2">
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="name" className="text-right">שם יישוב</Label>
+            <Input id="name" name="name" value={formData.name || ''} onChange={handleChange} className="col-span-3" />
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="region" className="text-right">אזור</Label>
+            <Input id="region" name="region" value={formData.region || ''} onChange={handleChange} className="col-span-3" />
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="sub_region" className="text-right">תת-אזור</Label>
+            <Input id="sub_region" name="sub_region" value={formData.sub_region || ''} onChange={handleChange} className="col-span-3" />
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="contact_person" className="text-right">איש קשר</Label>
+            <Input id="contact_person" name="contact_person" value={formData.contact_person || ''} onChange={handleChange} className="col-span-3" />
+          </div>
+          
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="contact_person_phone" className="text-right">טלפון איש קשר</Label>
+            <Input id="contact_person_phone" name="contact_person_phone" value={formData.contact_person_phone || ''} onChange={handleChange} className="col-span-3" />
+          </div>
+
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="operating_hours" className="text-right">שעות פעילות</Label>
+            <Input id="operating_hours" name="operating_hours" value={formData.operating_hours || ''} onChange={handleChange} className="col-span-3" placeholder="08:00-17:00"/>
+          </div>
+          
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label htmlFor="notes" className="text-right pt-2">הערות</Label>
+            <Textarea id="notes" name="notes" value={formData.notes || ''} onChange={handleChange} className="col-span-3" placeholder="הערות כלליות על היישוב"/>
+          </div>
+
+          {/* קואורדינטות */}
+          <div className="border-t pt-4">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3">קואורדינטות (אופציונלי)</h4>
+
+            <div className="grid grid-cols-4 items-center gap-4 mb-3">
+              <Label htmlFor="latitude" className="text-right">קו רוחב</Label>
+              <Input
+                id="latitude"
+                name="latitude"
+                type="number"
+                step="any"
+                value={formData.latitude || ''}
+                onChange={handleNumberChange}
+                className="col-span-3"
+                placeholder="31.7683 (לדוגמה: ירושלים)"
+              />
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="longitude" className="text-right">קו אורך</Label>
+              <Input
+                id="longitude"
+                name="longitude"
+                type="number"
+                step="any"
+                value={formData.longitude || ''}
+                onChange={handleNumberChange}
+                className="col-span-3"
+                placeholder="35.2137 (לדוגמה: ירושלים)"
+              />
+            </div>
+
+            <p className="text-xs text-gray-500 mt-2">
+              * אם לא מוזנות קואורדינטות, המערכת תנסה למצוא אותן באופן אוטומטי לפי שם היישוב
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>ביטול</Button>
+          <Button onClick={() => onSave(formData)} disabled={isProcessing}>
+            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : 'שמור'}
+          </Button>
+        </DialogFooter>
+      </>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <h2 className="text-2xl font-bold">ניהול יישובים</h2>
+        <div className="flex gap-2 flex-wrap">
+          {selectedItems.length > 0 && (
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isProcessing} className="flex items-center gap-2">
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4"/>} מחק נבחרים ({selectedItems.length})
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={handleUpdateAllCoordinates}
+            disabled={updateCoordsStatus.working || settlements.length === 0 || !apiKey}
+            className="gap-2 bg-white hover:bg-gray-50"
+          >
+             {updateCoordsStatus.working ? <Loader2 className="w-4 h-4 animate-spin"/> : <RefreshCw className="w-4 h-4"/>}
+             עדכן קואורדינטות
+          </Button>
+          <Button
+            variant="outline"
+            onClick={exportToExcel}
+            className="gap-2 bg-white hover:bg-gray-50"
+            disabled={settlements.length === 0}
+          >
+            <Download className="w-4 h-4" />
+            ייצוא לאקסל
+          </Button>
+          <Input
+            type="file"
+            id="upload-settlements"
+            className="hidden"
+            onChange={handleFileUpload}
+            disabled={uploadStatus.working}
+            accept=".csv"
+          />
+          <Button asChild variant="outline" disabled={uploadStatus.working}>
+            <label htmlFor="upload-settlements" className="cursor-pointer flex items-center gap-2">
+              <Upload className="w-4 h-4"/> טען קובץ CSV
+            </label>
+          </Button>
+          {/* New button for sample settlements */}
+          <Button onClick={addSampleSettlements} variant="outline" className="flex items-center gap-2" disabled={isProcessing}>
+            <Plus className="w-4 h-4" />
+            הוסף יישובי דוגמא
+          </Button>
+          <Button onClick={() => openForm()} className="flex items-center gap-2">
+            <PlusCircle className="w-4 h-4"/> הוסף יישוב
+          </Button>
+        </div>
+      </div>
+
+      {/* חיפוש */}
+      <div className="flex items-center gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <Input
+            placeholder="חיפוש לפי שם יישוב..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pr-10"
+          />
+        </div>
+        <div className="text-sm text-gray-600">
+          מציג {filteredAndSortedSettlements.length} מתוך {settlements.length} יישובים
+        </div>
+      </div>
+
+      {/* הוראות לייצוא מאקסל */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h3 className="font-semibold text-blue-800 mb-2">הוראות העלאת קובץ יישובים</h3>
+        <div className="text-sm text-blue-700 space-y-1">
+          <p>• הקובץ חייב להיות בפורמט CSV</p>
+          <p>• לייצוא מאקסל: בחר "שמירה בשם" ← "CSV (מופרד בפסיקים)"</p>
+          <p><strong>עמודות נדרשות:</strong></p>
+          <div className="mr-4 space-y-1">
+            <p>• <strong>יישוב</strong> (או "שם יישוב")</p>
+            <p>• <strong>איזור</strong></p>
+          </div>
+          <p><strong>עמודות אופציונליות:</strong></p>
+          <div className="mr-4 space-y-1">
+            <p>• <strong>תת איזור</strong> (או "תת-איזור")</p>
+            <p>• <strong>Latitude</strong> (או "קו רוחב")</p>
+            <p>• <strong>Longitude</strong> (או "קו אורך")</p>
+            <p>• כתובת</p>
+            <p>• איש קשר ביישוב (או "איש קשר")</p>
+            <p>• טלפון איש קשר (או "טלפון")</p>
+            <p>• שעות פעילות</p>
+            <p>• קבלן ראשי</p>
+            <p>• קבלן משני</p>
+            <p>• ימי הגעה (מופרדים בפסיקים)</p>
+            <p>• סלוטים זמינים (מופרדים בפסיקים)</p>
+            <p>• הערות</p>
+          </div>
+          <p><strong>קואורדינטות:</strong> אם לא מוזנות בקובץ, המערכת תנסה למצוא אותן באופן אוטומטי לפי שם היישוב. טווח קואורדינטות תקין לישראל: קו רוחב (Latitude): 29-34, קו אורך (Longitude): 34-36</p>
+        </div>
+      </div>
+
+      {updateCoordsStatus.message && (
+        <Alert variant={updateCoordsStatus.type === 'error' ? 'destructive' : 'default'} className={updateCoordsStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-blue-50 border-blue-200'}>
+            {updateCoordsStatus.working ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+            <div className="w-full">
+                <AlertDescription className="mr-2">{updateCoordsStatus.message}</AlertDescription>
+                {updateCoordsStatus.working && <Progress value={updateCoordsStatus.progress} className="w-full mt-2" />}
+            </div>
+        </Alert>
+      )}
+      
+      {uploadStatus.message && (
+        <Alert variant={uploadStatus.type === 'error' ? 'destructive' : 'default'} className={uploadStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-blue-50 border-blue-200'}>
+          {uploadStatus.type === 'error' && <AlertTriangle className="h-4 w-4" />}
+          {uploadStatus.type === 'success' && <CheckCircle className="h-4 w-4" />}
+          {uploadStatus.working && <Loader2 className="h-4 w-4 animate-spin" />}
+          <div className="w-full">
+            <AlertDescription className="mr-2">{uploadStatus.message}</AlertDescription>
+            {uploadStatus.working && uploadStatus.total > 0 && (
+              <div className="mt-2">
+                <Progress value={uploadStatus.progress} className="w-full" />
+                <div className="flex justify-between text-xs mt-1">
+                  <span>{Math.round(uploadStatus.progress)}%</span>
+                  {uploadStatus.remainingTime && <span>זמן לסיום: {uploadStatus.remainingTime}</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        </Alert>
+      )}
+
+      {loading ? <div className="text-center p-8"><Loader2 className="w-8 h-8 animate-spin mx-auto"/></div> : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={settlements.length > 0 && selectedItems.length === settlements.length}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="בחר הכל"
+                />
+              </TableHead>
+              <TableHead 
+                className="cursor-pointer hover:bg-gray-50 select-none"
+                onClick={() => handleSort('name')}
+              >
+                <div className="flex items-center gap-2">
+                  שם יישוב
+                  {sortBy === 'name' && (
+                    <span className="text-blue-600">
+                      {sortOrder === 'asc' ? '↑' : '↓'}
+                    </span>
+                  )}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="cursor-pointer hover:bg-gray-50 select-none"
+                onClick={() => handleSort('region')}
+              >
+                <div className="flex items-center gap-2">
+                  אזור
+                  {sortBy === 'region' && (
+                    <span className="text-blue-600">
+                      {sortOrder === 'asc' ? '↑' : '↓'}
+                    </span>
+                  )}
+                </div>
+              </TableHead>
+              <TableHead>איש קשר</TableHead>
+              <TableHead>שעות פעילות</TableHead>
+                <TableHead>פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredAndSortedSettlements.map(s => (
+              <TableRow key={s.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedItems.includes(s.id)}
+                    onCheckedChange={() => toggleSelectItem(s.id)}
+                    aria-label={`בחר ${s.name}`}
+                  />
+                </TableCell>
+                <TableCell className="font-medium">{s.name}</TableCell>
+                <TableCell>{s.region}</TableCell>
+                <TableCell>{s.contact_person}</TableCell>
+                <TableCell>{s.operating_hours}</TableCell>
+                <TableCell className="flex gap-2">
+                  <Button variant="ghost" size="icon" onClick={() => openForm(s)}><Edit className="w-4 h-4"/></Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)}><Trash2 className="w-4 h-4 text-red-500"/></Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingSettlement ? 'עריכת יישוב' : 'הוספת יישוב חדש'}</DialogTitle>
+          </DialogHeader>
+          <SettlementForm
+            settlement={editingSettlement}
+            onSave={handleSave}
+            onCancel={() => { setIsDialogOpen(false); setEditingSettlement(null); }}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

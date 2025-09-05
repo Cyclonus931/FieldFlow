@@ -1,0 +1,27 @@
+{
+  "name": "TaskType",
+  "type": "object",
+  "properties": {
+    "type_name": {
+      "type": "string",
+      "description": "שם סוג הפק''ע"
+    },
+    "duration_minutes": {
+      "type": "number",
+      "description": "משך הפק''ע בדקות"
+    },
+    "sla_days": {
+      "type": "number",
+      "description": "SLA בימי עסקים"
+    },
+    "description": {
+      "type": "string",
+      "description": "תיאור הפק''ע"
+    }
+  },
+  "required": [
+    "type_name",
+    "duration_minutes",
+    "sla_days"
+  ]
+}
