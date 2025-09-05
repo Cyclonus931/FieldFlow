@@ -1,8 +1,9 @@
-
 import React, { useState, useEffect } from "react";
 import { Settlement } from "@/entities/Settlement";
 import { Contractor } from "@/entities/Contractor";
 import { User } from "@/entities/User";
+import { ContractorAvailability } from "@/entities/ContractorAvailability";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,9 +19,9 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import MapView from "../components/map/MapView.js";
-import RegionFilters from "../components/filters/RegionFilters.js";
-import { PermissionGate } from '../components/auth/PermissionGate.js';
+import MapView from "../components/map/MapView";
+import RegionFilters from "../components/filters/RegionFilters";
+import { PermissionGate } from '../components/auth/PermissionGate';
 
 export default function Dashboard() {
   const [settlements, setSettlements] = useState([]);
@@ -31,6 +32,7 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
   const [contractors, setContractors] = useState([]);
+  const [contractorAvailabilities, setContractorAvailabilities] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
@@ -40,14 +42,16 @@ export default function Dashboard() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [settlementData, userData, contractorData] = await Promise.all([
+      const [settlementData, userData, contractorData, contractorAvailabilityData] = await Promise.all([
         Settlement.list('-updated_date'),
         User.me(),
-        Contractor.list()
+        Contractor.list(),
+        ContractorAvailability.list()
       ]);
       setSettlements(settlementData);
       setUser(userData);
       setContractors(contractorData);
+      setContractorAvailabilities(contractorAvailabilityData);
     } catch (err) {
       console.error("Error loading data:", err);
       setError('שגיאה בטעינת הנתונים');
@@ -65,74 +69,119 @@ export default function Dashboard() {
     return matchesSearch;
   });
 
-  // פונקציה למציאת קבלן ברירת מחדל עם לוגיקה מתוקנת
-  const findDefaultContractorName = (settlement, allContractors) => {
+  // פונקציה משופרת למציאת קבלן ברירת מחדל עם לוגיקה מתקדמת
+  const findDefaultContractorName = (settlement, allContractors, contractorAvailabilities) => {
     if (!settlement || !allContractors || allContractors.length === 0) {
       return null;
     }
 
     const activeContractors = allContractors.filter(c => c.active);
 
-    const getGeographicPriorityScore = (contractor) => {
-      // 1. קודם כל לבדוק אם יש קבלן שמשויך ישירות ליישוב דרך השדה contractor_1 (מזהה קבלן)
-      // Note: This logic for contractor_1 was not explicitly in the outline, but was in the original code.
-      // The outline focuses on geographic coverage. Assuming contractor_1 is a direct assignment,
-      // it should ideally override geographic coverage if present and active.
-      // However, the outline's new logic explicitly sorts by geographic score then contractor priority.
-      // For consistency with the outline's new sorting, we'll apply the geo scores first.
-      // If contractor_1 takes precedence, it should be handled *before* this sorting or as a separate check.
-      // Based on the provided outline, the sorting based on geoScore and contractor priority is the new directive.
-      // So, let's follow the outline's prioritization for geographic coverage.
+    // **עדיפות 1: בדיקת הקצאה ישירה דרך contractor_1**
+    if (settlement.contractor_1) {
+      const directAssignedContractor = activeContractors.find(c => c.id === settlement.contractor_1);
+      if (directAssignedContractor) {
+        console.log(`🎯 קבלן מוקצה ישירות: ${directAssignedContractor.name} ליישוב ${settlement.name}`);
+        return directAssignedContractor.name;
+      }
+    }
 
-      if (contractor.priority_settlements?.includes(settlement.name)) return 3; //Highest priority for exact settlement match
-      if (settlement.sub_region && contractor.sub_regions?.includes(settlement.sub_region)) return 2; // Mid priority for sub-region match
-      if (settlement.region && contractor.regions?.includes(settlement.region)) return 1; // Low priority for region match
-      return 0; // No geographic match
+    // **עדיפות 2: אלגוריתם מתקדם לבחירת קבלן לפי ציון מורכב**
+    
+    // פונקציה לחישוב ציון גאוגרפי
+    const getGeographicPriorityScore = (contractor) => {
+      if (contractor.priority_settlements?.includes(settlement.name)) return 100; // עדיפות מקסימלית ליישובי עדיפות
+      if (settlement.sub_region && contractor.sub_regions?.includes(settlement.sub_region)) return 75; // עדיפות גבוהה לתת-אזור
+      if (settlement.region && contractor.regions?.includes(settlement.region)) return 50; // עדיפות בסיסית לאזור
+      return 0; // אין התאמה גאוגרפית
     };
     
-    const getContractorPriorityValue = (priorityString) => {
+    // פונקציה לחישוב ציון זמינות
+    const getAvailabilityScore = (contractor) => {
+      // בדיקת זמינות ספציפית ליישוב
+      const specificAvailability = contractorAvailabilities?.find(av => 
+        av.contractor_id === contractor.contractor_id && 
+        av.settlement_name === settlement.name
+      );
+      
+      if (specificAvailability) {
+        // יש זמינות ספציפית - ציון גבוה
+        const daysCount = specificAvailability.days_of_week?.length || 0;
+        return 50 + (daysCount * 5); // בסיס של 50 + 5 נקודות לכל יום זמין
+      }
+      
+      // אם יש זמינות ברירת מחדל
+      if (contractor.default_hours) {
+        return 30; // ציון בסיסי לזמינות ברירת מחדל
+      }
+      
+      return 10; // ציון מינימלי אם אין מידע זמינות
+    };
+    
+    // פונקציה לחישוב ציון עדיפות קבלן כללית
+    const getContractorPriorityScore = (priorityString) => {
       switch (priorityString) {
-        case 'גבוה': return 3;
-        case 'רגיל': return 2;
-        case 'נמוך': return 1;
-        default: return 0; // Default for undefined or other values
+        case 'גבוה': return 30;
+        case 'רגיל': return 20;
+        case 'נמוך': return 10;
+        default: return 15; // ברירת מחדל
       }
     };
-    
+
+    // פונקציה לחישוב ציון סוגי משימות (מגוון = טוב יותר)
+    const getTaskTypesScore = (contractor) => {
+      const taskTypesCount = contractor.task_types?.length || 0;
+      return Math.min(taskTypesCount * 2, 20); // מקסימום 20 נקודות
+    };
+
+    // יצירת רשימת מועמדים עם ציונים
     const candidates = activeContractors
-      .map(contractor => ({
-        contractor,
-        geoScore: getGeographicPriorityScore(contractor),
-      }))
-      .filter(candidate => candidate.geoScore > 0); // Only consider candidates with a geographic match
+      .map(contractor => {
+        const geoScore = getGeographicPriorityScore(contractor);
+        const availabilityScore = getAvailabilityScore(contractor);
+        const priorityScore = getContractorPriorityScore(contractor.priority);
+        const taskTypesScore = getTaskTypesScore(contractor);
+        
+        // ציון כולל
+        const totalScore = geoScore + availabilityScore + priorityScore + taskTypesScore;
+        
+        return {
+          contractor,
+          geoScore,
+          availabilityScore,
+          priorityScore,
+          taskTypesScore,
+          totalScore
+        };
+      })
+      .filter(candidate => candidate.geoScore > 0) // רק קבלנים עם התאמה גאוגרפית
+      .sort((a, b) => {
+        // מיון לפי ציון כולל (גבוה לנמוך)
+        if (a.totalScore !== b.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        
+        // במקרה של תיקו - מיון לפי ציון גאוגרפי
+        if (a.geoScore !== b.geoScore) {
+          return b.geoScore - a.geoScore;
+        }
+        
+        // במקרה של תיקו נוסף - מיון לפי זמינות
+        return b.availabilityScore - a.availabilityScore;
+      });
 
     if (candidates.length === 0) {
-      // If no contractor covers the settlement geographically, check for a direct assignment via contractor_1
-      // This is a refinement to ensure the direct assignment is still considered.
-      if (settlement.contractor_1) {
-        const directContractor = activeContractors.find(c => c.id === settlement.contractor_1);
-        if (directContractor) {
-          return directContractor.name;
-        }
-      }
+      console.log(`❌ לא נמצא קבלן מתאים ליישוב ${settlement.name}`);
       return null;
     }
 
-    candidates.sort((a, b) => {
-      // 1. Sort by geographic priority (higher score first)
-      if (a.geoScore !== b.geoScore) {
-        return b.geoScore - a.geoScore;
-      }
-      // 2. Tie-breaker: Sort by contractor's general priority (higher value first)
-      const priorityA = getContractorPriorityValue(a.contractor.priority);
-      const priorityB = getContractorPriorityValue(b.contractor.priority);
-      return priorityB - priorityA;
-    });
-
-    // The best candidate is the first one in the sorted array
-    return candidates[0].contractor.name;
+    const selectedCandidate = candidates[0];
+    
+    console.log(`🏆 נבחר קבלן: ${selectedCandidate.contractor.name} ליישוב ${settlement.name}`);
+    console.log(`📊 ציונים: גיאוגרפי=${selectedCandidate.geoScore}, זמינות=${selectedCandidate.availabilityScore}, עדיפות=${selectedCandidate.priorityScore}, משימות=${selectedCandidate.taskTypesScore}, סה"כ=${selectedCandidate.totalScore}`);
+    
+    return selectedCandidate.contractor.name;
   };
-
 
   if (loading) {
     return (
@@ -156,6 +205,11 @@ export default function Dashboard() {
       return contractors.some(contractor => {
         if (!contractor.active) return false;
 
+        // Check for direct assignment first, consistent with new findDefaultContractorName logic
+        if (settlement.contractor_1 && contractor.id === settlement.contractor_1) {
+          return true;
+        }
+        
         if (contractor.priority_settlements?.includes(settlement.name)) {
           return true;
         }
@@ -168,11 +222,6 @@ export default function Dashboard() {
           return true;
         }
         
-        // Also consider direct assignment for stats if it implies coverage
-        if (settlement.contractor_1 && contractor.id === settlement.contractor_1) {
-          return true;
-        }
-
         return false;
       });
     }).length,
@@ -282,7 +331,7 @@ export default function Dashboard() {
               <CardContent className="h-full overflow-y-auto pb-6">
                 {selectedSettlement ? (
                   (() => {
-                    const defaultContractor = findDefaultContractorName(selectedSettlement, contractors);
+                    const defaultContractor = findDefaultContractorName(selectedSettlement, contractors, contractorAvailabilities);
                     return (
                       <div className="space-y-4">
                         <div>
