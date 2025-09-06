@@ -29,6 +29,11 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
     });
     const [isCreating, setIsCreating] = useState(false);
 
+    // New helper to handle changes from Selects and Inputs
+    const handleManualChange = (field, value) => {
+        setManualData(d => ({ ...d, [field]: value }));
+    };
+
     // Helper to parse HH:MM string to minutes from midnight
     const parseTimeToMinutes = (timeStr) => {
       const [hours, minutes] = timeStr.split(':').map(Number);
@@ -202,55 +207,59 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
     };
 
     return (
-        <Card className="bg-red-50 border-red-200">
+        <Card className="bg-white/80 backdrop-blur border-orange-200 mt-6 shadow-lg">
             <CardHeader>
-                <CardTitle className="text-red-700">תיאום ידני (מנהל)</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-orange-700">
+                    <Wand2 />
+                    תיאום ידני
+                </CardTitle>
+                <AlertDescription className="text-sm text-gray-600">
+                    אפשרות זו מאפשרת לקבוע תיאום באופן ידני ללא בדיקות SLA או הצעות אוטומטיות, תוך ביצוע בדיקות זמינות והתנגשות בסיסיות.
+                </AlertDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-                <div>
-                    <Label htmlFor="manualContractor">בחר קבלן</Label>
-                    <Select onValueChange={(val) => setManualData(d => ({...d, contractorId: val}))} value={manualData.contractorId}>
-                        <SelectTrigger id="manualContractor"><SelectValue placeholder="בחר קבלן" /></SelectTrigger>
+            <CardContent className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div className="space-y-2">
+                    <Label>יישוב</Label>
+                    <Select value={manualData.settlementName} onValueChange={(value) => handleManualChange('settlementName', value)}>
+                        <SelectTrigger><SelectValue placeholder="בחר יישוב" /></SelectTrigger>
                         <SelectContent>
-                            {contractors.filter(c => c.contractor_id && c.name).map(c => (
-                                <SelectItem key={c.id} value={c.contractor_id}>{c.name}</SelectItem>
-                            ))}
+                            {settlements
+                                .filter(s => s.name)
+                                .map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
-                <div>
-                    <Label htmlFor="manualSettlement">בחר יישוב</Label>
-                    <Select onValueChange={(val) => setManualData(d => ({...d, settlementName: val}))} value={manualData.settlementName}>
-                        <SelectTrigger id="manualSettlement"><SelectValue placeholder="בחר יישוב" /></SelectTrigger>
+                <div className="space-y-2">
+                    <Label>סוג פק"ע</Label>
+                    <Select value={manualData.taskType} onValueChange={(value) => handleManualChange('taskType', value)}>
+                        <SelectTrigger><SelectValue placeholder="בחר סוג פקע" /></SelectTrigger>
                         <SelectContent>
-                            {settlements.filter(s => s.name).map(s => (
-                                <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
-                            ))}
+                            {taskTypes
+                                .filter(t => t.type_name)
+                                .map(t => <SelectItem key={t.id} value={t.type_name}>{t.type_name} ({t.duration_minutes} דק')</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
-                <div>
-                    <Label htmlFor="manualTaskType">בחר סוג פק"ע</Label>
-                    <Select onValueChange={(val) => setManualData(d => ({...d, taskType: val}))} value={manualData.taskType}>
-                        <SelectTrigger id="manualTaskType">
-                            <SelectValue placeholder="בחר סוג פק&quot;ע" />
-                        </SelectTrigger>
+                <div className="space-y-2">
+                    <Label>קבלן</Label>
+                    <Select value={manualData.contractorId} onValueChange={(value) => handleManualChange('contractorId', value)}>
+                        <SelectTrigger><SelectValue placeholder="בחר קבלן" /></SelectTrigger>
                         <SelectContent>
-                            {taskTypes.filter(t => t.type_name).map(t => (
-                                <SelectItem key={t.id} value={t.type_name}>{t.type_name}</SelectItem>
-                            ))}
+                            {contractors
+                                .filter(c => c.contractor_id)
+                                .map(c => <SelectItem key={c.id} value={c.contractor_id}>{c.name}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
-                <div>
-                    <Label htmlFor="manualDate">תאריך</Label>
-                    <Input id="manualDate" type="date" value={manualData.date} onChange={(e) => setManualData(d => ({...d, date: e.target.value}))}/>
+                <div className="space-y-2">
+                    <Label>תאריך</Label>
+                    <Input type="date" value={manualData.date} onChange={(e) => handleManualChange('date', e.target.value)}/>
                 </div>
-                <div>
-                    <Label htmlFor="manualTimeSlot">שעות</Label>
-                    <Input id="manualTimeSlot" type="text" placeholder="שעות, למשל 08:00-10:00" value={manualData.timeSlot} onChange={(e) => setManualData(d => ({...d, timeSlot: e.target.value}))} />
+                <div className="space-y-2">
+                    <Label>שעות</Label>
+                    <Input type="text" placeholder="שעות, למשל 08:00-10:00" value={manualData.timeSlot} onChange={(e) => handleManualChange('timeSlot', e.target.value)} />
                 </div>
-                <Button onClick={handleCreate} disabled={isCreating} className="w-full bg-red-600 hover:bg-red-700">
+                <Button onClick={handleCreate} disabled={isCreating} className="w-full bg-red-600 hover:bg-red-700 lg:col-span-5">
                     {isCreating ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/>יוצר...</> : 'צור תיאום בכפייה'}
                 </Button>
             </CardContent>
@@ -430,7 +439,9 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
 
       const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
       const isBlackout = blackoutDatesSet.has(currentDateStr);
-      if ((isWeekend || isBlackout) && !managerApproval) {
+      // יום זה אינו יום עבודה תקני אם הוא סופ"ש או חג (אלא אם יש אישור מנהל)
+      const isNotStandardWorkDay = isWeekend || isBlackout;
+      if (isNotStandardWorkDay && !managerApproval) {
         currentDate.setDate(currentDate.getDate() + 1);
         continue;
       }
@@ -440,7 +451,6 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
       // *** FIXED: Check settlement arrival days first ***
       if (settlement.arrival_days && settlement.arrival_days.length > 0) {
         if (!settlement.arrival_days.includes(dayOfWeekHebrew)) {
-          console.log(`🚫 יישוב ${settlement.name} אינו מקבל הגעות ביום ${dayOfWeekHebrew}`);
           currentDate.setDate(currentDate.getDate() + 1);
           continue;
         }
@@ -453,38 +463,35 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
       );
 
       let availableHours = null;
-      let reasonForHours = "";
+      let isScheduledDay = false; // פלגל חדש שבודק אם זהו יום עבודה מתוכנן
 
       if (specificAvailabilities.length > 0) {
-          // Check if any of the specific availabilities include this day
           const matchingAvailability = specificAvailabilities.find(av => 
               av.days_of_week?.includes(dayOfWeekHebrew)
           );
 
           if (matchingAvailability) {
               availableHours = matchingAvailability.time_range;
-              reasonForHours = "זמינות ספציפית ליישוב";
+              isScheduledDay = true; // זהו יום עבודה מתוכנן לפי זמינות ספציפית
           } else {
-              // None of the specific availabilities include this day for this date
-              const allSpecificDays = [...new Set(specificAvailabilities.flatMap(av => av.days_of_week || []))];
-              console.log(`🚫 ${contractor.name} לא זמין ב-${settlement.name} ביום ${dayOfWeekHebrew} (זמינות ספציפית: ${allSpecificDays.join(', ') || 'לא מוגדרים'})`);
               currentDate.setDate(currentDate.getDate() + 1);
               continue;
           }
       } else {
-          // No specific availability - use default hours
-          availableHours = contractor.default_hours;
-          reasonForHours = "זמינות ברירת מחדל";
+          // בדוק אם זהו יום עבודה רגיל (לא סופ"ש/חג) ואז השתמש בברירת מחדל
+          if (!isNotStandardWorkDay) {
+            availableHours = contractor.default_hours;
+            isScheduledDay = true; // זהו יום עבודה מתוכנן לפי ברירת מחדל
+          }
       }
 
-      // אם אין שעות זמינות (יכול לקרות אם לא מוגדרות שעות ברירת מחדל), דלג על היום
       if (!availableHours) {
         currentDate.setDate(currentDate.getDate() + 1);
         continue;
       }
 
       const [start, end] = availableHours.split('-');
-      if (!start || !end) { // Ensure time range is valid
+      if (!start || !end) {
         currentDate.setDate(currentDate.getDate() + 1);
         continue;
       }
@@ -497,13 +504,14 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
         const isBusy = contractorAppointmentsByDate[currentDateStr]?.some(apt => checkTimeSlotOverlap(apt.time_slot, slotTime));
         
         if (!isBusy) {
-            // דירוג הסלוט
             let slotScore = 100;
-            slotScore -= daysBetween(searchStartDate, currentDate); // עדיפות לתאריכים קרובים
-            if (hour < 12) slotScore += 10; // בונוס לבוקר
-            // This bonus could be tricky if it conflicts with real availability needs.
-            // Consider if a contractor is 'working' on a day but only has one appt - this bonus makes sense.
-            if (contractorAppointmentsByDate[currentDateStr] && contractorAppointmentsByDate[currentDateStr].length > 0) slotScore += 50; // בונוס לניצול יום
+            slotScore -= daysBetween(searchStartDate, currentDate); 
+            if (hour < 12) slotScore += 10;
+
+            // בונוס ניצול יום יינתן רק אם זהו יום עבודה מתוכנן והקבלן כבר נמצא שם
+            if (isScheduledDay && contractorAppointmentsByDate[currentDateStr]?.length > 0) {
+              slotScore += 50; // בונוס ניצול יום עבודה מתוכנן
+            }
 
             scoredSlots.push({ date: currentDateStr, time: slotTime, score: slotScore });
         }
@@ -511,7 +519,6 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
       
       currentDate.setDate(currentDate.getDate() + 1);
     }
-    // החזרת כל הסלוטים ממוינים לפי הציון שלהם
     return scoredSlots.sort((a, b) => b.score - a.score);
   };
 
@@ -531,31 +538,24 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
     
     // ציון עדיפות
     const priorityScores = { 'גבוה': 50, 'רגיל': 25, 'נמוך': 0 };
-    score += priorityScores[contractor.priority] || 10; // Default to 10 if priority is undefined or 'נמוך'
+    score += priorityScores[contractor.priority] || 10;
     if((priorityScores[contractor.priority] || 0) > 0) reasons.push(`עדיפות ${contractor.priority}`);
 
     const allAvailableSlots = generateAndScoreSlotsForContractor(contractor);
     
-    // בונוס על ניצול יום עבודה קיים
-    const contractorAppointmentsByDate = activeAppointments
-      .filter(apt => apt.contractor_id === contractor.contractor_id)
-      .reduce((acc, apt) => {
-        (acc[apt.appointment_date] = acc[apt.appointment_date] || []).push(apt);
-        return acc;
-      }, {});
-
-    if (allAvailableSlots.some(slot => contractorAppointmentsByDate[slot.date] && contractorAppointmentsByDate[slot.date].length > 0)) {
-        score += 100;
+    // הלוגיקה של הבונוס עברה לתוך generateAndScoreSlotsForContractor כדי להיות יותר מדויקת,
+    // כך שכאן אין צורך בבדיקה נוספת. רק צריך לוודא שיש סיבה הגיונית.
+    if (allAvailableSlots.some(slot => slot.score > 120)) { // 120 כסף בסיס לזיהוי בונוס
         reasons.push('ניצול יום עבודה');
     }
     
     return {
       contractor,
       score: Math.max(0, Math.round(score)),
-      reasons: [...new Set(reasons)], // Ensure unique reasons
-      slots: allAvailableSlots.slice(0, 3) // הצג עד 3 סלוטים מועדפים
+      reasons: [...new Set(reasons)],
+      slots: allAvailableSlots.slice(0, 3)
     };
-  }).filter(c => c.slots.length > 0); // סנן החוצה קבלנים ללא סלוטים זמינים
+  }).filter(c => c.slots.length > 0);
 
   // 3. מיון סופי של הקבלנים והחזרת 3 המובילים
   return scoredContractors.sort((a, b) => b.score - a.score).slice(0, 3);
