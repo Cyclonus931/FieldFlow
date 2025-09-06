@@ -152,10 +152,7 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
                     av.days_of_week?.includes(dayOfWeekHebrew)
                 );
 
-                if (!matchingAvailability) {
-                    const allSpecificDays = [...new Set(specificAvailabilities.flatMap(av => av.days_of_week || []))];
-                    availabilityReason = `הקבלן אינו זמין ביישוב זה ביום ${dayOfWeekHebrew} (הזמינות הספציפית היא לימים: ${allSpecificDays.join(', ') || 'לא מוגדרים'}).`;
-                } else {
+                if (matchingAvailability) {
                     // Day is correct, now check time
                     if (isSlotWithinRange(manualData.timeSlot, matchingAvailability.time_range)) {
                         isAvailable = true;
@@ -163,6 +160,10 @@ const ManualScheduler = ({ contractors, settlements, taskTypes, onAppointmentCre
                     } else {
                         availabilityReason = `הקבלן זמין ביישוב זה ביום ${dayOfWeekHebrew} רק בשעות ${matchingAvailability.time_range}.`;
                     }
+                } else {
+                    // If specific availabilities exist but not for this day, then not available
+                    const allSpecificDays = [...new Set(specificAvailabilities.flatMap(av => av.days_of_week || []))];
+                    availabilityReason = `הקבלן אינו זמין ביישוב זה ביום ${dayOfWeekHebrew} (הזמינות הספציפית היא לימים: ${allSpecificDays.join(', ') || 'לא מוגדרים'}).`;
                 }
             } else {
                 // No specific availability - check against default availability
@@ -421,7 +422,7 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
     return Math.round(Math.abs((date1.getTime() - date2.getTime()) / oneDay));
   };
   
-  // פונקציית עזר ליצירת ודירוג סלוטים עבור קבלן - IMPROVED
+  // פונקציית עזר ליצירת ודירוג סלוטים עבור קבלן
   const generateAndScoreSlotsForContractor = (contractor) => {
     const scoredSlots = [];
     let currentDate = new Date(searchStartDate);
@@ -437,18 +438,15 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
       const dayOfWeek = currentDate.getDay();
       const currentDateStr = formatDateLocal(currentDate);
 
+      // --- שלב 1: בדיקות כלליות לתאריך (סופ"ש, חג, יום הגעה ליישוב) ---
       const isWeekend = dayOfWeek === 5 || dayOfWeek === 6;
       const isBlackout = blackoutDatesSet.has(currentDateStr);
-      // יום זה אינו יום עבודה תקני אם הוא סופ"ש או חג (אלא אם יש אישור מנהל)
-      const isNotStandardWorkDay = isWeekend || isBlackout;
-      if (isNotStandardWorkDay && !managerApproval) {
+      if ((isWeekend || isBlackout) && !managerApproval) {
         currentDate.setDate(currentDate.getDate() + 1);
         continue;
       }
       
       const dayOfWeekHebrew = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'][dayOfWeek];
-      
-      // *** FIXED: Check settlement arrival days first ***
       if (settlement.arrival_days && settlement.arrival_days.length > 0) {
         if (!settlement.arrival_days.includes(dayOfWeekHebrew)) {
           currentDate.setDate(currentDate.getDate() + 1);
@@ -456,39 +454,40 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
         }
       }
       
-      // *** FIXED: Use filter instead of find for multiple availability records ***
+      // --- שלב 2: בדיקת זמינות ספציפית לקבלן ---
       const specificAvailabilities = contractorAvailabilities.filter(av => 
           av.contractor_id === contractor.contractor_id && 
           av.settlement_name === settlement.name
       );
 
       let availableHours = null;
-      let isScheduledDay = false; // פלגל חדש שבודק אם זהו יום עבודה מתוכנן
 
       if (specificAvailabilities.length > 0) {
-          const matchingAvailability = specificAvailabilities.find(av => 
-              av.days_of_week?.includes(dayOfWeekHebrew)
-          );
+        // אם קיימות הגדרות ספציפיות ליישוב, הן המקור היחיד. מתעלמים מברירת המחדל.
+        const matchingAvailability = specificAvailabilities.find(av => 
+            av.days_of_week?.includes(dayOfWeekHebrew)
+        );
 
-          if (matchingAvailability) {
-              availableHours = matchingAvailability.time_range;
-              isScheduledDay = true; // זהו יום עבודה מתוכנן לפי זמינות ספציפית
-          } else {
-              currentDate.setDate(currentDate.getDate() + 1);
-              continue;
-          }
+        if (matchingAvailability) {
+          // נמצאה התאמה ליום הנוכחי בהגדרות הספציפיות
+          availableHours = matchingAvailability.time_range;
+        } else {
+          // קיימות הגדרות ספציפיות אבל לא ליום זה. הקבלן לא זמין היום ביישוב זה.
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
       } else {
-          // בדוק אם זהו יום עבודה רגיל (לא סופ"ש/חג) ואז השתמש בברירת מחדל
-          if (!isNotStandardWorkDay) {
-            availableHours = contractor.default_hours;
-            isScheduledDay = true; // זהו יום עבודה מתוכנן לפי ברירת מחדל
-          }
+        // אין הגדרות ספציפיות ליישוב, לכן ניתן להשתמש בזמינות ברירת המחדל של הקבלן.
+        availableHours = contractor.default_hours;
       }
 
       if (!availableHours) {
+        // אם אין שעות זמינות כלל (לא ספציפי ולא ברירת מחדל), דלג ליום הבא.
         currentDate.setDate(currentDate.getDate() + 1);
         continue;
       }
+      
+      const hasExistingAppointmentsToday = contractorAppointmentsByDate[currentDateStr]?.length > 0;
 
       const [start, end] = availableHours.split('-');
       if (!start || !end) {
@@ -508,9 +507,9 @@ const getSmartScheduling = async (params, settlements, contractors, contractorAv
             slotScore -= daysBetween(searchStartDate, currentDate); 
             if (hour < 12) slotScore += 10;
 
-            // בונוס ניצול יום יינתן רק אם זהו יום עבודה מתוכנן והקבלן כבר נמצא שם
-            if (isScheduledDay && contractorAppointmentsByDate[currentDateStr]?.length > 0) {
-              slotScore += 50; // בונוס ניצול יום עבודה מתוכנן
+            // בונוס ניצול יום עבודה יינתן רק אם הקבלן כבר מגיע לאזור באותו יום
+            if (hasExistingAppointmentsToday) {
+              slotScore += 50; // בונוס ניצול יום עבודה
             }
 
             scoredSlots.push({ date: currentDateStr, time: slotTime, score: slotScore });
@@ -1017,3 +1016,4 @@ export default function Scheduling() {
     </div>
   );
 }
+
